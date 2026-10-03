@@ -18,6 +18,7 @@ const origin = 'http://localhost:5173';
 describeWithDb('anonymous experiment events', () => {
   let pool: Pool;
   let client: PoolClient;
+  let auth: PostgresAuthService;
   let app: ReturnType<typeof createApp>;
   let adminCookie: string;
   const schema = `test_${randomUUID().replaceAll('-', '')}`;
@@ -29,7 +30,7 @@ describeWithDb('anonymous experiment events', () => {
     await client.query(`CREATE SCHEMA ${schema}`);
     await client.query(`SET search_path TO ${schema}`);
     await applyMigrations(client, directory);
-    const auth = new PostgresAuthService(client, Buffer.alloc(32, 5));
+    auth = new PostgresAuthService(client, Buffer.alloc(32, 5));
     app = createApp({ auth, metrics: new PostgresMetricsService(client), allowedOrigins: [origin], secureCookies: false });
     const admin = await auth.provisionAdmin('지표운영자', 'admin-password-123');
     const login = await app(new Request('http://localhost/api/v1/admin/auth/login', {
@@ -96,5 +97,27 @@ describeWithDb('anonymous experiment events', () => {
     const stored = await client.query('SELECT * FROM metric_events WHERE event_type = $1', ['letter_open']);
     expect(stored.rows[0]).not.toHaveProperty('letter_id');
     expect(stored.rows[0]).not.toHaveProperty('body');
+  });
+
+  it('reports trusted signup, member-letter, and active-reaction counts from database records', async () => {
+    const member = await auth.signup('지표회원', 'member-password-123');
+    const questionId = randomUUID();
+    const letterId = randomUUID();
+    await client.query(`INSERT INTO questions (id, bridge_id, body, effective_at, status)
+      VALUES ($1, 'bongnim', '질문', now(), 'published')`, [questionId]);
+    await client.query(`INSERT INTO letters
+      (id, bridge_id, question_id, author_user_id, display_nickname, body, theme, is_seed, status)
+      VALUES ($1, 'bongnim', $2, $3, '지표회원', '오늘도 힘내요', 1, false, 'published')`,
+    [letterId, questionId, member.user.id]);
+    await client.query(`INSERT INTO reactions (id, letter_id, user_id, active, activated_at)
+      VALUES ($1, $2, $3, true, now())`, [randomUUID(), letterId, member.user.id]);
+    const report = await app(new Request('http://localhost/api/v1/admin/metrics', { headers: { cookie: adminCookie } }));
+    const data = (await report.json()) as { data: {
+      signupCompleted: number; memberLettersByBridge: Array<{ bridgeId: string; count: number }>;
+      activeReactionsByBridge: Array<{ bridgeId: string; count: number }>;
+    } };
+    expect(data.data.signupCompleted).toBe(1);
+    expect(data.data.memberLettersByBridge).toContainEqual({ bridgeId: 'bongnim', count: 1 });
+    expect(data.data.activeReactionsByBridge).toContainEqual({ bridgeId: 'bongnim', count: 1 });
   });
 });

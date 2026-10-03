@@ -122,6 +122,10 @@ describeWithDb('admin question API', () => {
     expect(inbox.status).toBe(200);
     expect(((await inbox.json()) as { data: Array<{ id: string; body: string }> }).data)
       .toContainEqual(expect.objectContaining({ id: inquiry.rows[0].id, body: '개인정보가 보여요' }));
+    const alerts = await app(new Request('http://localhost/api/v1/admin/alerts', { headers: { cookie } }));
+    expect(alerts.status).toBe(200);
+    expect(((await alerts.json()) as { data: { privacyInquiries: number; pendingReportLetters: number } }).data)
+      .toMatchObject({ privacyInquiries: 1, pendingReportLetters: 1 });
 
     const hide = await send(app, `/api/v1/admin/letters/${letterId}/review`, 'POST',
       { decision: 'hide', reason: '개인정보 확인 중' }, { cookie, 'x-csrf-token': csrf });

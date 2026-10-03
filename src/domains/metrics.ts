@@ -76,18 +76,30 @@ export class PostgresMetricsService {
 
   async summary() {
     const result = await this.db.query<{ bridge_id: string | null; count: number }>(
-      `SELECT bridge_id, count(*)::int AS count FROM metric_events
-       WHERE event_type = 'survey_open' GROUP BY bridge_id ORDER BY bridge_id NULLS FIRST`,
+        `SELECT bridge_id, count(*)::int AS count FROM metric_events
+         WHERE event_type = 'survey_open' GROUP BY bridge_id ORDER BY bridge_id NULLS FIRST`,
     );
     const funnel = await this.db.query<{ bridge_id: string; event_type: string; letter_kind: string | null; count: number }>(
-      `SELECT bridge_id, event_type, letter_kind, count(*)::int AS count
-       FROM metric_events WHERE bridge_id IS NOT NULL AND event_type <> 'survey_open'
-       GROUP BY bridge_id, event_type, letter_kind ORDER BY bridge_id, event_type, letter_kind`,
+        `SELECT bridge_id, event_type, letter_kind, count(*)::int AS count
+         FROM metric_events WHERE bridge_id IS NOT NULL AND event_type <> 'survey_open'
+         GROUP BY bridge_id, event_type, letter_kind ORDER BY bridge_id, event_type, letter_kind`,
+    );
+    const signups = await this.db.query<{ count: number }>(`SELECT count(*)::int AS count FROM users WHERE role = 'member'`);
+    const letters = await this.db.query<{ bridge_id: string; count: number }>(
+        `SELECT bridge_id, count(*)::int AS count FROM letters
+         WHERE is_seed = false AND status <> 'deleted' GROUP BY bridge_id ORDER BY bridge_id`,
+    );
+    const reactions = await this.db.query<{ bridge_id: string; count: number }>(
+        `SELECT l.bridge_id, count(*)::int AS count FROM reactions r JOIN letters l ON l.id = r.letter_id
+         WHERE r.active = true AND l.status = 'published' GROUP BY l.bridge_id ORDER BY l.bridge_id`,
     );
     return {
       surveyOpens: result.rows.map((row) => ({ bridgeId: row.bridge_id, count: row.count })),
       eventsByBridge: funnel.rows.map((row) => ({ bridgeId: row.bridge_id, eventType: row.event_type,
         letterKind: row.letter_kind, count: row.count })),
+      signupCompleted: signups.rows[0].count,
+      memberLettersByBridge: letters.rows.map((row) => ({ bridgeId: row.bridge_id, count: row.count })),
+      activeReactionsByBridge: reactions.rows.map((row) => ({ bridgeId: row.bridge_id, count: row.count })),
     };
   }
 }

@@ -199,6 +199,7 @@ export function createApp(options: AppOptions = {}) {
           await auth.authenticateAdmin(sessionCookie(request, secure));
           if (path === '/api/v1/admin/reports') return send(200, { data: await options.admin.listReports() });
           if (path === '/api/v1/admin/inquiries') return send(200, { data: await options.admin.listInquiries() });
+          if (path === '/api/v1/admin/alerts') return send(200, { data: await options.admin.alerts() });
           if (path === '/api/v1/admin/moderation-rules') return send(200, { data: await options.admin.listModerationRules() });
         } else {
           if (!allowedOrigin) return send(403, { error: { code: 'ORIGIN_DENIED', message: '요청 출처를 확인해 주세요.' } });

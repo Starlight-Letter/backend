@@ -215,6 +215,26 @@ export class PostgresAdminService {
     }));
   }
 
+  async alerts() {
+    const inquiries = await this.db.query<{ count: number }>(
+        `SELECT count(*)::int AS count FROM inquiries
+         WHERE type IN ('privacy', 'removal') AND status <> 'resolved'`,
+    );
+    const reports = await this.db.query<{ total: number; hidden: number }>(
+        `SELECT count(*)::int AS total,
+           count(*) FILTER (WHERE status = 'hidden')::int AS hidden
+         FROM letters l WHERE status <> 'deleted' AND EXISTS (
+           SELECT 1 FROM reports r WHERE r.letter_id = l.id
+             AND r.round = l.report_round AND r.status = 'pending'
+         )`,
+    );
+    return {
+      privacyInquiries: inquiries.rows[0].count,
+      pendingReportLetters: reports.rows[0].total,
+      hiddenPendingReview: reports.rows[0].hidden,
+    };
+  }
+
   async reviewLetter(id: string, decision: unknown, reasonInput: unknown, actorId: string) {
     if (!['hide', 'restore', 'dismiss', 'delete'].includes(String(decision))) {
       throw new AdminError(422, 'INVALID_DECISION', '처리 방법을 확인해 주세요.');
