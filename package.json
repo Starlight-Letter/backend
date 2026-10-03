@@ -5,11 +5,18 @@
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "dev": "tsx src/handlers/local.ts",
+    "db:migrate": "tsx src/db/migrate-cli.ts"
   },
   "devDependencies": {
     "@types/node": "24.13.2",
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.23.15",
     "typescript": "5.9.3",
     "vitest": "3.2.7"
+  },
+  "dependencies": {
+    "pg": "^8.23.1"
   }
 }
