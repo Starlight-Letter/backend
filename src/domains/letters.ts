@@ -109,6 +109,15 @@ export class PostgresLetterService {
       if (category) {
         throw new LetterError(422, 'CONTENT_REVISE', '편지 내용을 수정해 주세요.', category);
       }
+      const rules = await client.query<{ category: ModerationCategory; phrase: string }>(
+        'SELECT category, phrase FROM moderation_rules WHERE active = true',
+      );
+      const searchable = letterBody.normalize('NFKC').replace(/[\u200B\uFEFF\u200C\u200D]/gu, '').toLocaleLowerCase('ko-KR');
+      for (const rule of rules.rows) {
+        if (searchable.includes(rule.phrase.normalize('NFKC').toLocaleLowerCase('ko-KR'))) {
+          throw new LetterError(422, 'CONTENT_REVISE', '편지 내용을 수정해 주세요.', rule.category);
+        }
+      }
       const bridge = await client.query<{ id: string }>(
         'SELECT id FROM bridges WHERE id = $1 AND active = true', [input.bridgeId],
       );

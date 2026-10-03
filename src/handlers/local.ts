@@ -7,6 +7,8 @@ import { PostgresLetterService } from '../domains/letters';
 import { PostgresEngagementService } from '../domains/engagement';
 import { PostgresReportService } from '../domains/reports';
 import { PostgresInquiryService } from '../domains/inquiries';
+import { PostgresAdminService } from '../domains/admin';
+import { PostgresMetricsService } from '../domains/metrics';
 import { createApp } from '../http/app';
 
 type App = ReturnType<typeof createApp>;
@@ -58,11 +60,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const port = Number(process.env.PORT ?? 3000);
   startServer(createApp({
     bridges: new PostgresBridgeRepository(pool),
-    auth: new PostgresAuthService(pool),
+    auth: new PostgresAuthService(pool, process.env.ADMIN_TOTP_KEY ? Buffer.from(process.env.ADMIN_TOTP_KEY, 'base64') : undefined),
     letters: new PostgresLetterService(pool),
     engagement: new PostgresEngagementService(pool),
     reports: new PostgresReportService(pool),
     inquiries: new PostgresInquiryService(pool),
+    admin: new PostgresAdminService(pool),
+    metrics: new PostgresMetricsService(pool),
     allowedOrigins: [process.env.APP_ORIGIN ?? 'http://localhost:5173'],
     secureCookies: false,
   }), port).then(() => {

@@ -7,7 +7,9 @@
     "build": "tsc --noEmit",
     "test": "vitest run",
     "dev": "tsx src/handlers/local.ts",
-    "db:migrate": "tsx src/db/migrate-cli.ts"
+    "db:migrate": "tsx src/db/migrate-cli.ts",
+    "admin:provision": "tsx src/handlers/provision-admin.ts",
+    "admin:reset-totp": "tsx src/handlers/provision-admin.ts reset"
   },
   "devDependencies": {
     "@types/node": "24.13.2",

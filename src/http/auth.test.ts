@@ -4,6 +4,7 @@ import { Pool, type PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { applyMigrations } from '../db/migrations';
 import { PostgresAuthService } from '../domains/auth';
+import { totp } from '../domains/totp';
 import { createApp } from './app';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -152,5 +153,36 @@ describeWithDb('account API backed by PostgreSQL', () => {
     const logout = await post('/api/v1/auth/logout', {}, { cookie, 'x-csrf-token': created.data.csrfToken });
     expect(logout.status).toBe(200);
     expect((await app(new Request('http://localhost/api/v1/me', { headers: { cookie } }))).status).toBe(401);
+  });
+
+  it('rejects an admin through member login and requires a fresh TOTP for an admin session', async () => {
+    const admin = new PostgresAuthService(authPool, Buffer.alloc(32, 7));
+    const provisioned = await admin.provisionAdmin('별빛운영자', 'admin-password-123');
+    const ordinary = await post('/api/v1/auth/login', { nickname: '별빛운영자', password: 'admin-password-123' });
+    expect(ordinary.status).toBe(401);
+
+    const adminApp = createApp({ auth: admin, allowedOrigins: [origin], secureCookies: false });
+    const login = (totp: string) => adminApp(new Request('http://localhost/api/v1/admin/auth/login', {
+      method: 'POST', headers: { origin, 'content-type': 'application/json' },
+      body: JSON.stringify({ nickname: '별빛운영자', password: 'admin-password-123', totp }),
+    }));
+    expect((await login('000000')).status).toBe(401);
+    const code = totp(provisioned.totpSecret, new Date());
+    const accepted = await login(code);
+    expect(accepted.status).toBe(200);
+    const lifetime = await client.query<{ hours: number }>(
+      `SELECT extract(epoch FROM (s.expires_at - s.created_at))/3600 AS hours
+       FROM sessions s JOIN users u ON u.id = s.user_id WHERE u.nickname_key = '별빛운영자'`,
+    );
+    expect(Number(lifetime.rows[0].hours)).toBeLessThanOrEqual(12);
+    expect((await login(code)).status).toBe(401);
+    const cookie = accepted.headers.get('set-cookie')!.split(';')[0];
+    const me = await adminApp(new Request('http://localhost/api/v1/me', { headers: { cookie } }));
+    expect(me.status).toBe(200);
+
+    const replacement = await admin.resetAdminTotp('별빛운영자');
+    expect(replacement.totpSecret).not.toBe(provisioned.totpSecret);
+    expect((await adminApp(new Request('http://localhost/api/v1/me', { headers: { cookie } }))).status).toBe(401);
+    expect((await login(totp(replacement.totpSecret, new Date()))).status).toBe(200);
   });
 });

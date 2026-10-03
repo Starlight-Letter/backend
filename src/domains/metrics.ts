@@ -1,0 +1,93 @@
+import { createHash } from 'node:crypto';
+import type { Pool, PoolClient } from 'pg';
+
+export class MetricsError extends Error {
+  constructor(public readonly status: number, public readonly code: string, message: string) { super(message); }
+}
+
+export class PostgresMetricsService {
+  constructor(private readonly db: Pool | PoolClient) {}
+
+  async surveyOpen(eventId: unknown, bridgeId: unknown, source: string) {
+    return this.record(eventId, 'survey_open', bridgeId, null, source);
+  }
+
+  async record(eventId: unknown, eventType: unknown, bridgeIdInput: unknown, letterId: unknown, source: string) {
+    if (!['survey_open', 'qr_entry', 'letter_open', 'five_reached', 'signup_start', 'write_start'].includes(String(eventType))) {
+      throw new MetricsError(400, 'INVALID_EVENT_TYPE', '이벤트 종류를 확인해 주세요.');
+    }
+    if (typeof eventId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(eventId)) {
+      throw new MetricsError(400, 'INVALID_EVENT_ID', '이벤트 식별값을 확인해 주세요.');
+    }
+    if (bridgeIdInput !== null && bridgeIdInput !== undefined && typeof bridgeIdInput !== 'string') {
+      throw new MetricsError(400, 'INVALID_BRIDGE', '다리 정보를 확인해 주세요.');
+    }
+    let bridgeId = bridgeIdInput ?? null;
+    let letterKind: 'seed' | 'member' | null = null;
+    if (eventType === 'letter_open') {
+      if (typeof letterId !== 'string' || !/^[0-9a-f-]{36}$/i.test(letterId)) {
+        throw new MetricsError(400, 'INVALID_LETTER', '편지 정보를 확인해 주세요.');
+      }
+      const letter = await this.db.query<{ bridge_id: string; is_seed: boolean }>(
+        `SELECT bridge_id, is_seed FROM letters WHERE id = $1 AND status = 'published'`, [letterId],
+      );
+      if (!letter.rows[0]) throw new MetricsError(404, 'LETTER_NOT_FOUND', '편지를 찾을 수 없습니다.');
+      bridgeId = letter.rows[0].bridge_id;
+      letterKind = letter.rows[0].is_seed ? 'seed' : 'member';
+    } else if (eventType !== 'survey_open' && !bridgeId) {
+      throw new MetricsError(400, 'BRIDGE_REQUIRED', '다리를 선택해 주세요.');
+    }
+    const existing = await this.db.query<{ bridge_id: string | null; event_type: string; letter_kind: string | null }>(
+      'SELECT bridge_id, event_type, letter_kind FROM metric_events WHERE id = $1', [eventId],
+    );
+    if (existing.rows[0]) {
+      if (existing.rows[0].bridge_id !== bridgeId || existing.rows[0].event_type !== eventType ||
+          existing.rows[0].letter_kind !== letterKind) {
+        throw new MetricsError(409, 'EVENT_CONFLICT', '동일한 이벤트 식별값을 사용할 수 없습니다.');
+      }
+      return { counted: false };
+    }
+    const sourceKey = createHash('sha256').update(`metric:${eventType}:${source}`).digest('hex');
+    const attempts = await this.db.query<{ attempts: number }>(
+      `INSERT INTO auth_attempts (key_hash, attempts, window_started_at) VALUES ($1, 1, now())
+       ON CONFLICT (key_hash) DO UPDATE SET
+         attempts = CASE WHEN auth_attempts.window_started_at < now() - interval '15 minutes'
+           THEN 1 ELSE auth_attempts.attempts + 1 END,
+         window_started_at = CASE WHEN auth_attempts.window_started_at < now() - interval '15 minutes'
+           THEN now() ELSE auth_attempts.window_started_at END
+       RETURNING attempts`, [sourceKey],
+    );
+    if (attempts.rows[0].attempts > (eventType === 'survey_open' ? 20 : 100)) {
+      throw new MetricsError(429, 'RATE_LIMITED', '잠시 후 다시 시도해 주세요.');
+    }
+    try {
+      const result = await this.db.query(
+        `INSERT INTO metric_events (id, event_type, bridge_id, letter_kind)
+         VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING`, [eventId, eventType, bridgeId, letterKind],
+      );
+      return { counted: result.rowCount === 1 };
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === '23503') {
+        throw new MetricsError(404, 'BRIDGE_NOT_FOUND', '다리를 찾을 수 없습니다.');
+      }
+      throw error;
+    }
+  }
+
+  async summary() {
+    const result = await this.db.query<{ bridge_id: string | null; count: number }>(
+      `SELECT bridge_id, count(*)::int AS count FROM metric_events
+       WHERE event_type = 'survey_open' GROUP BY bridge_id ORDER BY bridge_id NULLS FIRST`,
+    );
+    const funnel = await this.db.query<{ bridge_id: string; event_type: string; letter_kind: string | null; count: number }>(
+      `SELECT bridge_id, event_type, letter_kind, count(*)::int AS count
+       FROM metric_events WHERE bridge_id IS NOT NULL AND event_type <> 'survey_open'
+       GROUP BY bridge_id, event_type, letter_kind ORDER BY bridge_id, event_type, letter_kind`,
+    );
+    return {
+      surveyOpens: result.rows.map((row) => ({ bridgeId: row.bridge_id, count: row.count })),
+      eventsByBridge: funnel.rows.map((row) => ({ bridgeId: row.bridge_id, eventType: row.event_type,
+        letterKind: row.letter_kind, count: row.count })),
+    };
+  }
+}

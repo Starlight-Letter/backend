@@ -5,6 +5,8 @@ import { LetterError, type PostgresLetterService } from '../domains/letters';
 import { EngagementError, type PostgresEngagementService } from '../domains/engagement';
 import { ReportError, type PostgresReportService } from '../domains/reports';
 import { InquiryError, type PostgresInquiryService } from '../domains/inquiries';
+import { AdminError, type PostgresAdminService } from '../domains/admin';
+import { MetricsError, type PostgresMetricsService } from '../domains/metrics';
 
 const MAX_BODY_BYTES = 16 * 1024;
 
@@ -18,6 +20,8 @@ export interface AppOptions {
   engagement?: PostgresEngagementService;
   reports?: PostgresReportService;
   inquiries?: PostgresInquiryService;
+  admin?: PostgresAdminService;
+  metrics?: PostgresMetricsService;
   allowedOrigins?: string[];
   secureCookies?: boolean;
   now?: () => Date;
@@ -56,10 +60,10 @@ function sessionCookie(request: Request, secure: boolean): string | null {
   return item?.slice(name.length + 1) ?? null;
 }
 
-function setSessionCookie(response: Response, value: string, secure: boolean, clear = false): void {
+function setSessionCookie(response: Response, value: string, secure: boolean, clear = false, maxAge = 2592000): void {
   const name = secure ? '__Host-star_session' : 'star_session_dev';
   response.headers.set('set-cookie',
-    `${name}=${value}; Path=/; HttpOnly; SameSite=Lax${secure ? '; Secure' : ''}${clear ? '; Max-Age=0' : '; Max-Age=2592000'}`,
+    `${name}=${value}; Path=/; HttpOnly; SameSite=Lax${secure ? '; Secure' : ''}; Max-Age=${clear ? 0 : maxAge}`,
   );
 }
 
@@ -117,7 +121,7 @@ export function createApp(options: AppOptions = {}) {
         return new Response(null, { status: 204, headers: {
           'access-control-allow-origin': allowedOrigin,
           'access-control-allow-credentials': 'true',
-          'access-control-allow-methods': 'GET, POST, PUT, DELETE, OPTIONS',
+          'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
           'access-control-allow-headers': 'content-type, x-csrf-token, idempotency-key',
           'x-request-id': requestId,
           vary: 'Origin',
@@ -128,7 +132,7 @@ export function createApp(options: AppOptions = {}) {
         return send(200, { data: { status: 'ok' } });
       }
 
-      const authPath = path.startsWith('/api/v1/auth/') || path === '/api/v1/me' || path.startsWith('/api/v1/me/');
+      const authPath = path.startsWith('/api/v1/auth/') || path.startsWith('/api/v1/admin/') || path === '/api/v1/me' || path.startsWith('/api/v1/me/');
       if (authPath && !options.auth) {
         return send(503, { error: { code: 'SERVICE_UNAVAILABLE', message: '서비스를 이용할 수 없습니다.' } });
       }
@@ -150,6 +154,79 @@ export function createApp(options: AppOptions = {}) {
         const response = send(200, { data: { user: result.user, csrfToken: result.csrfToken } });
         setSessionCookie(response, result.sessionToken, secure);
         return response;
+      }
+      if (auth && request.method === 'POST' && path === '/api/v1/admin/auth/login') {
+        const input = payload(body);
+        const result = await auth.adminLogin(input.nickname, input.password, input.totp, clientSource);
+        const response = send(200, { data: { user: result.user, csrfToken: result.csrfToken } });
+        setSessionCookie(response, result.sessionToken, secure, false, 43200);
+        return response;
+      }
+      if (request.method === 'POST' && path === '/api/v1/events/survey-open') {
+        if (!options.metrics) return send(503, { error: { code: 'SERVICE_UNAVAILABLE', message: '서비스를 이용할 수 없습니다.' } });
+        if (!allowedOrigin) return send(403, { error: { code: 'ORIGIN_DENIED', message: '요청 출처를 확인해 주세요.' } });
+        const input = payload(body);
+        const result = await options.metrics.surveyOpen(input.eventId, input.bridgeId, clientSource);
+        return send(result.counted ? 201 : 200, { data: result });
+      }
+      if (request.method === 'POST' && path === '/api/v1/events') {
+        if (!options.metrics) return send(503, { error: { code: 'SERVICE_UNAVAILABLE', message: '서비스를 이용할 수 없습니다.' } });
+        if (!allowedOrigin) return send(403, { error: { code: 'ORIGIN_DENIED', message: '요청 출처를 확인해 주세요.' } });
+        const input = payload(body);
+        const result = await options.metrics.record(input.eventId, input.eventType, input.bridgeId, input.letterId, clientSource);
+        return send(result.counted ? 201 : 200, { data: result });
+      }
+      if (request.method === 'GET' && path === '/api/v1/admin/metrics') {
+        if (!auth || !options.metrics) return send(503, { error: { code: 'SERVICE_UNAVAILABLE', message: '서비스를 이용할 수 없습니다.' } });
+        await auth.authenticateAdmin(sessionCookie(request, secure));
+        return send(200, { data: await options.metrics.summary() });
+      }
+      const adminQuestionMatch = /^\/api\/v1\/admin\/questions\/([^/]+)$/.exec(path);
+      if ((request.method === 'POST' && path === '/api/v1/admin/questions') ||
+          (request.method === 'PATCH' && adminQuestionMatch)) {
+        if (!auth || !options.admin) return send(503, { error: { code: 'SERVICE_UNAVAILABLE', message: '서비스를 이용할 수 없습니다.' } });
+        if (!allowedOrigin) return send(403, { error: { code: 'ORIGIN_DENIED', message: '요청 출처를 확인해 주세요.' } });
+        const actor = await auth.authorizeAdmin(sessionCookie(request, secure), request.headers.get('x-csrf-token'));
+        const input = payload(body);
+        const data = adminQuestionMatch
+          ? await options.admin.correctQuestion(adminQuestionMatch[1], input.body, actor.id)
+          : await options.admin.createQuestion(input.bridgeId, input.body, input.effectiveAt, actor.id, options.now?.() ?? new Date());
+        return send(adminQuestionMatch ? 200 : 201, { data });
+      }
+      if (path.startsWith('/api/v1/admin/') && path !== '/api/v1/admin/auth/login') {
+        if (!auth || !options.admin) return send(503, { error: { code: 'SERVICE_UNAVAILABLE', message: '서비스를 이용할 수 없습니다.' } });
+        if (request.method === 'GET') {
+          await auth.authenticateAdmin(sessionCookie(request, secure));
+          if (path === '/api/v1/admin/reports') return send(200, { data: await options.admin.listReports() });
+          if (path === '/api/v1/admin/inquiries') return send(200, { data: await options.admin.listInquiries() });
+          if (path === '/api/v1/admin/moderation-rules') return send(200, { data: await options.admin.listModerationRules() });
+        } else {
+          if (!allowedOrigin) return send(403, { error: { code: 'ORIGIN_DENIED', message: '요청 출처를 확인해 주세요.' } });
+          const actor = await auth.authorizeAdmin(sessionCookie(request, secure), request.headers.get('x-csrf-token'));
+          const input = payload(body);
+          if (request.method === 'POST' && path === '/api/v1/admin/seeds') {
+            return send(201, { data: await options.admin.createSeed(input.bridgeId, input.body, input.theme, input.displayNickname, actor.id) });
+          }
+          const seedMatch = /^\/api\/v1\/admin\/seeds\/([^/]+)$/.exec(path);
+          if (request.method === 'PATCH' && seedMatch) {
+            return send(200, { data: await options.admin.editSeed(seedMatch[1], input.body, input.theme, input.displayNickname, actor.id) });
+          }
+          if (request.method === 'POST' && path === '/api/v1/admin/moderation-rules') {
+            return send(201, { data: await options.admin.addModerationRule(input.category, input.phrase, input.reason, actor.id) });
+          }
+          const ruleMatch = /^\/api\/v1\/admin\/moderation-rules\/([^/]+)$/.exec(path);
+          if (request.method === 'PATCH' && ruleMatch) {
+            return send(200, { data: await options.admin.setModerationRule(ruleMatch[1], input.active, input.reason, actor.id) });
+          }
+          const reviewMatch = /^\/api\/v1\/admin\/letters\/([^/]+)\/review$/.exec(path);
+          if (request.method === 'POST' && reviewMatch) {
+            return send(200, { data: await options.admin.reviewLetter(reviewMatch[1], input.decision, input.reason, actor.id) });
+          }
+          const inquiryMatch = /^\/api\/v1\/admin\/inquiries\/([^/]+)$/.exec(path);
+          if (request.method === 'PATCH' && inquiryMatch) {
+            return send(200, { data: await options.admin.updateInquiry(inquiryMatch[1], input.status, input.reason, actor.id) });
+          }
+        }
       }
       if (auth && request.method === 'POST' && path === '/api/v1/auth/recover') {
         const input = payload(body);
@@ -277,6 +354,8 @@ export function createApp(options: AppOptions = {}) {
       if (error instanceof EngagementError) return send(error.status, { error: { code: error.code, message: error.message } });
       if (error instanceof ReportError) return send(error.status, { error: { code: error.code, message: error.message } });
       if (error instanceof InquiryError) return send(error.status, { error: { code: error.code, message: error.message } });
+      if (error instanceof AdminError) return send(error.status, { error: { code: error.code, message: error.message } });
+      if (error instanceof MetricsError) return send(error.status, { error: { code: error.code, message: error.message } });
       return send(500, { error: { code: 'INTERNAL_ERROR', message: '요청을 처리하지 못했습니다.' } });
     }
   };
