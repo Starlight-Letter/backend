@@ -2,6 +2,11 @@ import { createServer, type Server } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { Pool } from 'pg';
 import { PostgresBridgeRepository } from '../db/bridges';
+import { PostgresAuthService } from '../domains/auth';
+import { PostgresLetterService } from '../domains/letters';
+import { PostgresEngagementService } from '../domains/engagement';
+import { PostgresReportService } from '../domains/reports';
+import { PostgresInquiryService } from '../domains/inquiries';
 import { createApp } from '../http/app';
 
 type App = ReturnType<typeof createApp>;
@@ -9,6 +14,7 @@ type App = ReturnType<typeof createApp>;
 export async function startServer(app: App, port: number): Promise<Server> {
   const server = createServer(async (incoming, outgoing) => {
     try {
+      const clientIp = incoming.socket.remoteAddress ?? 'unknown';
       const chunks: Buffer[] = [];
       let size = 0;
       for await (const chunk of incoming) {
@@ -24,6 +30,7 @@ export async function startServer(app: App, port: number): Promise<Server> {
         if (typeof value === 'string') headers.set(name, value);
         else if (Array.isArray(value)) value.forEach((item) => headers.append(name, item));
       }
+      headers.set('x-starlight-client-ip', clientIp);
       const request = new Request(`http://localhost${incoming.url ?? '/'}`, {
         method,
         headers,
@@ -49,7 +56,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required');
   const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 5 });
   const port = Number(process.env.PORT ?? 3000);
-  startServer(createApp({ bridges: new PostgresBridgeRepository(pool) }), port).then(() => {
+  startServer(createApp({
+    bridges: new PostgresBridgeRepository(pool),
+    auth: new PostgresAuthService(pool),
+    letters: new PostgresLetterService(pool),
+    engagement: new PostgresEngagementService(pool),
+    reports: new PostgresReportService(pool),
+    inquiries: new PostgresInquiryService(pool),
+    allowedOrigins: [process.env.APP_ORIGIN ?? 'http://localhost:5173'],
+    secureCookies: false,
+  }), port).then(() => {
     process.stdout.write(`API listening on http://127.0.0.1:${port}\n`);
   });
 }
