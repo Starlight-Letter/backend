@@ -29,6 +29,8 @@ DATABASE_URL=postgresql://localhost:5432/starlight_dev npm run db:migrate
 DATABASE_URL=postgresql://localhost:5432/starlight_dev APP_ORIGIN=http://localhost:5173 npm run dev
 ```
 
+화면 확인용 시작 편지가 필요하면 마이그레이션 후 `psql postgresql://localhost:5432/starlight_dev -f scripts/seed-local-letters.sql`을 실행합니다. 세 다리에 5통씩 넣는 반복 실행 가능한 **개발용 예시**이며 실제 공개 문구는 운영자 콘솔에서 별도로 검토·등록합니다.
+
 운영자 계정은 공개 가입으로 만들 수 없습니다. 개발 DB에 마이그레이션을 적용한 뒤 32바이트 비밀키를 base64로 만들어 `ADMIN_TOTP_KEY`에 지정하고, `ADMIN_NICKNAME`·`ADMIN_PASSWORD`와 함께 `npm run admin:provision`을 실행합니다. 출력되는 TOTP 비밀값은 최초 한 번만 안전하게 보관하고 인증 앱에 등록합니다. 인증 앱을 잃어버린 경우 DB 관리 권한이 있는 로컬 셸에서 동일한 키와 닉네임으로 `npm run admin:reset-totp`를 실행합니다. 이 작업은 기존 운영자 세션을 모두 폐기하고 새 TOTP 비밀값을 한 번 출력합니다. 서버 실행 때도 같은 `ADMIN_TOTP_KEY`가 필요합니다. 키가 없거나 바뀌면 운영자 로그인을 사용할 수 없습니다. 운영자 로그인 경로는 `POST /api/v1/admin/auth/login`이며 12시간 세션을 발급합니다.
 
 운영자 관리 API는 `/api/v1/admin/questions`, `/api/v1/admin/seeds`, `/api/v1/admin/reports`, `/api/v1/admin/letters/:id/review`, `/api/v1/admin/inquiries`, `/api/v1/admin/moderation-rules`, `/api/v1/admin/metrics`, `/api/v1/admin/alerts`, `/api/v1/admin/survey` 아래에 있습니다. 변경 요청에는 허용된 `Origin`, 운영자 세션 쿠키와 `x-csrf-token`이 필요합니다. 공개 `GET /api/v1/survey`는 현재 설문 노출 여부와 기간 중 링크를 반환합니다. 운영자는 `PUT /api/v1/admin/survey`로 HTTPS 링크와 UTC 시작·종료 시각을 설정합니다. 설정 전에는 설문이 보이지 않습니다. `POST /api/v1/events/survey-open`은 클릭만 집계하고 설문 완료를 뜻하지 않습니다. `POST /api/v1/events`는 QR 진입, 편지 열람 등 익명 퍼널 이벤트를 받습니다. `GET /api/v1/admin/metrics`는 기본 누적 수치이며 `from`·`to`(UTC ISO 시각)를 함께 보내면 `[from, to)` 기간만 조회합니다.
