@@ -29,6 +29,17 @@ function assertLetterId(id: string): void {
 export class PostgresEngagementService {
   constructor(private readonly db: Db) {}
 
+  async state(letterId: string, userId: string) {
+    await this.published(letterId);
+    const result = await this.db.query<{ reacted: boolean; saved: boolean; reaction_count: number }>(
+      `SELECT EXISTS(SELECT 1 FROM reactions WHERE letter_id = $1 AND user_id = $2 AND active = true) AS reacted,
+              EXISTS(SELECT 1 FROM saves WHERE letter_id = $1 AND user_id = $2) AS saved,
+              (SELECT count(*)::int FROM reactions WHERE letter_id = $1 AND active = true) AS reaction_count`,
+      [letterId, userId],
+    );
+    return { reacted: result.rows[0].reacted, saved: result.rows[0].saved, reactionCount: result.rows[0].reaction_count };
+  }
+
   private async published(id: string): Promise<void> {
     assertLetterId(id);
     const found = await this.db.query('SELECT id FROM letters WHERE id = $1 AND status = $2', [id, 'published']);

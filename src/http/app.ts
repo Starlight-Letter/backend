@@ -320,6 +320,12 @@ export function createApp(options: AppOptions = {}) {
         const user = await auth.authenticate(sessionCookie(request, secure));
         return send(200, { data: await options.engagement.saved(user.id) });
       }
+      const engagementStateMatch = /^\/api\/v1\/letters\/([^/]+)\/engagement$/.exec(path);
+      if (request.method === 'GET' && engagementStateMatch) {
+        if (!options.engagement || !auth) return send(503, { error: { code: 'SERVICE_UNAVAILABLE', message: '서비스를 이용할 수 없습니다.' } });
+        const user = await auth.authenticate(sessionCookie(request, secure));
+        return send(200, { data: await options.engagement.state(engagementStateMatch[1], user.id) });
+      }
       const reactionMatch = /^\/api\/v1\/letters\/([^/]+)\/reaction$/.exec(path);
       const saveMatch = /^\/api\/v1\/letters\/([^/]+)\/save$/.exec(path);
       if ((request.method === 'PUT' || request.method === 'DELETE') && (reactionMatch || saveMatch)) {

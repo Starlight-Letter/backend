@@ -292,7 +292,10 @@ export class PostgresAuthService {
   }
 
   async logout(sessionToken: string | null, csrfToken: string | null): Promise<void> {
-    await this.authorizeMutation(sessionToken, csrfToken);
+    const session = await this.session(sessionToken);
+    if (!csrfToken || !safeEqual(digest(csrfToken), session.csrf_hash)) {
+      throw new AuthError(403, 'CSRF_REQUIRED', '요청 인증 정보가 올바르지 않습니다.');
+    }
     await this.db.query('UPDATE sessions SET revoked_at = now() WHERE token_hash = $1', [digest(sessionToken!)]);
   }
 

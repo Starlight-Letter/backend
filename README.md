@@ -37,6 +37,8 @@ DATABASE_URL=postgresql://localhost:5432/starlight_dev APP_ORIGIN=http://localho
 
 로컬 인증 쿠키 이름은 `star_session_dev`입니다. 실제 HTTPS 환경에서는 `__Host-star_session`을 사용하며, 상태를 변경하는 회원 요청은 허용된 `Origin`과 `x-csrf-token`을 요구합니다. 가입 응답의 복구 코드는 그 응답에만 포함되므로 사용자가 직접 보관해야 합니다. 현재 내용 검사는 기본 규칙이며 운영자 편집·검토 체계가 완성되기 전에는 공개 출시용 검사로 간주하지 않습니다.
 
+로그인 회원은 `GET /api/v1/letters/:id/engagement`로 자신이 해당 편지에 남긴 반응·보관 상태와 현재 반응 수를 읽을 수 있습니다. 프론트엔드는 이 상태를 불러온 뒤 반응과 보관 버튼을 활성화합니다.
+
 ```bash
 TEST_DATABASE_URL=postgresql://localhost:5432/starlight_test npm test
 ```

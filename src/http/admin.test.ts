@@ -292,4 +292,16 @@ describeWithDb('admin question API', () => {
     expect(disabled.status).toBe(200);
     expect((await write(randomUUID())).status).toBe(201);
   });
+
+  it('lets an admin log out with CSRF and revokes the session', async () => {
+    const denied = await app(new Request('http://localhost/api/v1/auth/logout', {
+      method: 'POST', headers: { origin, cookie },
+    }));
+    expect(denied.status).toBe(403);
+    const loggedOut = await app(new Request('http://localhost/api/v1/auth/logout', {
+      method: 'POST', headers: { origin, cookie, 'x-csrf-token': csrf },
+    }));
+    expect(loggedOut.status).toBe(200);
+    expect((await app(new Request('http://localhost/api/v1/admin/questions', { headers: { cookie } }))).status).toBe(401);
+  });
 });

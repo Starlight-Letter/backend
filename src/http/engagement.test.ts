@@ -74,6 +74,11 @@ describeWithDb('reaction, save, and current best API', () => {
     const ranked = await best.json() as { data: Array<{ id: string; reactionCount: number }> };
     expect(ranked.data).toMatchObject([{ id: letterId, reactionCount: 1 }]);
     expect((await mutate('PUT', `/api/v1/letters/${letterId}/save`)).status).toBe(200);
+    const stateResponse = await app(new Request(`http://localhost/api/v1/letters/${letterId}/engagement`, { headers: { cookie } }));
+    expect(stateResponse.status).toBe(200);
+    expect((await stateResponse.json() as { data: unknown }).data).toEqual({ reacted: true, saved: true, reactionCount: 1 });
+    const guestState = await app(new Request(`http://localhost/api/v1/letters/${letterId}/engagement`));
+    expect(guestState.status).toBe(401);
     expect((await mutate('DELETE', reactionPath)).status).toBe(200);
     const after = await app(new Request('http://localhost/api/v1/best?scope=bridge&bridgeId=sillim&period=week'));
     expect((await after.json() as { data: unknown[] }).data).toEqual([]);
