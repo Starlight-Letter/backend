@@ -7,6 +7,7 @@ import { PostgresBridgeRepository } from '../db/bridges';
 import { PostgresAuthService } from '../domains/auth';
 import { PostgresAdminService } from '../domains/admin';
 import { PostgresLetterService } from '../domains/letters';
+import { PostgresSurveyService } from '../domains/survey';
 import { totp } from '../domains/totp';
 import { createApp } from './app';
 
@@ -37,6 +38,7 @@ describeWithDb('admin question API', () => {
     auth = new PostgresAuthService(client, Buffer.alloc(32, 9));
     app = createApp({ auth, admin: new PostgresAdminService(client), bridges: new PostgresBridgeRepository(client),
       letters: new PostgresLetterService(client),
+      survey: new PostgresSurveyService(client),
       allowedOrigins: [origin], secureCookies: false, now: () => now });
     const provisioned = await auth.provisionAdmin('질문운영자', 'admin-password-123');
     const response = await app(new Request('http://localhost/api/v1/admin/auth/login', {
@@ -88,6 +90,65 @@ describeWithDb('admin question API', () => {
     expect((await send(app, '/api/v1/admin/questions', 'POST', input, { cookie, 'x-csrf-token': csrf })).status).toBe(422);
   });
 
+  it('lists each bridge current and next-week question and includes hidden start letters', async () => {
+    const currentId = randomUUID();
+    const scheduledId = randomUUID();
+    await client.query(`INSERT INTO questions (id, bridge_id, body, effective_at, status)
+      VALUES ($1, 'bongnim', '조회용 현재 질문', '2026-09-27T15:00:00Z', 'published'),
+             ($2, 'bongnim', '조회용 다음 질문', '2026-10-04T15:00:00Z', 'published')`,
+    [currentId, scheduledId]);
+    const questions = await app(new Request('http://localhost/api/v1/admin/questions', { headers: { cookie } }));
+    expect(questions.status).toBe(200);
+    const questionData = (await questions.json()) as { data: Array<{
+      bridgeId: string; currentQuestion: { id: string } | null; scheduledQuestions: Array<{ id: string }>;
+      nextWeekMissing: boolean;
+    }> };
+    expect(questionData.data).toHaveLength(3);
+    expect(questionData.data.find((row) => row.bridgeId === 'bongnim')).toMatchObject({
+      currentQuestion: { id: currentId }, scheduledQuestions: [{ id: scheduledId }], nextWeekMissing: false,
+    });
+    expect(questionData.data.find((row) => row.bridgeId === 'sillim2')?.nextWeekMissing).toBe(true);
+    expect((await app(new Request('http://localhost/api/v1/admin/questions'))).status).toBe(401);
+
+    const seed = await send(app, '/api/v1/admin/seeds', 'POST', {
+      bridgeId: 'sillim2', body: '당신을 응원해요.', theme: 1, displayNickname: '별빛안부',
+    }, { cookie, 'x-csrf-token': csrf });
+    const seedId = ((await seed.json()) as { data: { id: string } }).data.id;
+    expect((await send(app, `/api/v1/admin/letters/${seedId}/review`, 'POST',
+      { decision: 'hide', reason: '시작 편지 잠시 비공개' }, { cookie, 'x-csrf-token': csrf })).status).toBe(200);
+    const seeds = await app(new Request('http://localhost/api/v1/admin/seeds?bridgeId=sillim2', { headers: { cookie } }));
+    expect(seeds.status).toBe(200);
+    expect(((await seeds.json()) as { data: Array<{ id: string; status: string }> }).data)
+      .toContainEqual(expect.objectContaining({ id: seedId, status: 'hidden' }));
+  });
+
+  it('shows the survey link only during the configured experiment window', async () => {
+    const invalid = await send(app, '/api/v1/admin/survey', 'PUT', {
+      url: 'http://unsafe.example/form', startsAt: '2026-10-04T15:00:00.000Z',
+      endsAt: '2026-10-06T15:00:00.000Z', enabled: true, reason: '실험 준비',
+    }, { cookie, 'x-csrf-token': csrf });
+    expect(invalid.status).toBe(422);
+    const impossibleDate = await send(app, '/api/v1/admin/survey', 'PUT', {
+      url: 'https://survey.example/form', startsAt: '2026-02-30T00:00:00.000Z',
+      endsAt: '2026-03-05T00:00:00.000Z', enabled: true, reason: '실험 준비',
+    }, { cookie, 'x-csrf-token': csrf });
+    expect(impossibleDate.status).toBe(422);
+    const configured = await send(app, '/api/v1/admin/survey', 'PUT', {
+      url: 'https://survey.example/form', startsAt: '2026-10-04T15:00:00.000Z',
+      endsAt: '2026-10-06T15:00:00.000Z', enabled: true, reason: '실험 일정 확정',
+    }, { cookie, 'x-csrf-token': csrf });
+    expect(configured.status).toBe(200);
+    expect((await app(new Request('http://localhost/api/v1/admin/survey'))).status).toBe(401);
+    const before = await app(new Request('http://localhost/api/v1/survey'));
+    expect((await before.json()) as { data: unknown }).toEqual({ data: { active: false } });
+    const duringApp = createApp({ survey: new PostgresSurveyService(client), now: () => new Date('2026-10-04T15:00:00Z') });
+    const during = await duringApp(new Request('http://localhost/api/v1/survey'));
+    expect((await during.json()) as { data: unknown }).toEqual({ data: { active: true, url: 'https://survey.example/form' } });
+    const afterApp = createApp({ survey: new PostgresSurveyService(client), now: () => new Date('2026-10-06T15:00:00Z') });
+    const after = await afterApp(new Request('http://localhost/api/v1/survey'));
+    expect((await after.json()) as { data: unknown }).toEqual({ data: { active: false } });
+  });
+
   it('publishes a start letter, reviews a reported letter, and resolves a private inquiry', async () => {
     const seed = await send(app, '/api/v1/admin/seeds', 'POST', {
       bridgeId: 'bongnim', body: '오늘도 잘 버텨 왔어요.', theme: 1, displayNickname: '별빛안부',
@@ -132,6 +193,13 @@ describeWithDb('admin question API', () => {
     expect(hide.status).toBe(200);
     const hidden = await client.query('SELECT status FROM letters WHERE id = $1', [letterId]);
     expect(hidden.rows[0].status).toBe('hidden');
+    const keepHidden = await send(app, `/api/v1/admin/letters/${letterId}/review`, 'POST',
+      { decision: 'keep_hidden', reason: '운영 정책 위반 확인' }, { cookie, 'x-csrf-token': csrf });
+    expect(keepHidden.status).toBe(200);
+    const reportStatus = await client.query('SELECT status FROM reports WHERE id = $1', [firstReport]);
+    expect(reportStatus.rows[0].status).toBe('upheld');
+    const reviewedAlerts = await app(new Request('http://localhost/api/v1/admin/alerts', { headers: { cookie } }));
+    expect(((await reviewedAlerts.json()) as { data: { pendingReportLetters: number } }).data.pendingReportLetters).toBe(0);
     const restore = await send(app, `/api/v1/admin/letters/${letterId}/review`, 'POST',
       { decision: 'restore', reason: '개인정보 없음 확인' }, { cookie, 'x-csrf-token': csrf });
     expect(restore.status).toBe(200);
@@ -183,6 +251,25 @@ describeWithDb('admin question API', () => {
     expect(((await inbox.json()) as { data: Array<{ id: string; requesterUserId: string; relatedLetterAuthorUserId: string }> }).data)
       .toContainEqual(expect.objectContaining({ id: inquiryId, requesterUserId: member.user.id,
         relatedLetterAuthorUserId: member.user.id }));
+  });
+
+  it('flags reports from recently created accounts for operator review', async () => {
+    const letterId = randomUUID();
+    const recent = randomUUID();
+    const established = randomUUID();
+    await client.query(`INSERT INTO letters (id, bridge_id, display_nickname, body, theme, is_seed, status)
+      VALUES ($1, 'sillim', '별빛안부', '응원합니다', 1, true, 'published')`, [letterId]);
+    await client.query(`INSERT INTO users
+      (id, nickname, nickname_key, password_hash, recovery_code_hash, role, status, created_at)
+      VALUES ($1, '최근신고자', '최근신고자', 'hash', 'recovery', 'member', 'active', now() - interval '1 hour'),
+             ($2, '오래된신고자', '오래된신고자', 'hash', 'recovery', 'member', 'active', now() - interval '30 days')`,
+    [recent, established]);
+    await client.query(`INSERT INTO reports (id, letter_id, reporter_user_id, round, reason_code, status)
+      VALUES ($1, $3, $4, 1, 'other', 'pending'), ($2, $3, $5, 1, 'other', 'pending')`,
+    [randomUUID(), randomUUID(), letterId, recent, established]);
+    const response = await app(new Request('http://localhost/api/v1/admin/reports', { headers: { cookie } }));
+    expect(((await response.json()) as { data: Array<{ letterId: string; reportCount: number; newReporterCount: number }> }).data)
+      .toContainEqual(expect.objectContaining({ letterId, reportCount: 2, newReporterCount: 1 }));
   });
 
   it('lets an admin activate and disable a literal content rule without redeploying', async () => {

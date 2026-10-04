@@ -8,6 +8,7 @@ import { PostgresReportService } from '../domains/reports';
 import { PostgresInquiryService } from '../domains/inquiries';
 import { PostgresAdminService } from '../domains/admin';
 import { PostgresMetricsService } from '../domains/metrics';
+import { PostgresSurveyService } from '../domains/survey';
 
 interface HttpApiEvent {
   rawPath: string;
@@ -56,6 +57,7 @@ export const handler = createLambdaHandler(createApp({
   inquiries: pool ? new PostgresInquiryService(pool) : undefined,
   admin: pool ? new PostgresAdminService(pool) : undefined,
   metrics: pool ? new PostgresMetricsService(pool) : undefined,
+  survey: pool ? new PostgresSurveyService(pool) : undefined,
   allowedOrigins: process.env.APP_ORIGIN ? [process.env.APP_ORIGIN] : [],
   secureCookies: true,
 }));

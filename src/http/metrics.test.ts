@@ -33,6 +33,8 @@ describeWithDb('anonymous experiment events', () => {
     auth = new PostgresAuthService(client, Buffer.alloc(32, 5));
     app = createApp({ auth, metrics: new PostgresMetricsService(client), allowedOrigins: [origin], secureCookies: false });
     const admin = await auth.provisionAdmin('지표운영자', 'admin-password-123');
+    await client.query(`INSERT INTO survey_campaign (id, url, starts_at, ends_at, enabled, updated_by)
+      VALUES (1, 'https://survey.example/form', '2020-01-01T00:00:00Z', '2099-01-01T00:00:00Z', true, $1)`, [admin.id]);
     const login = await app(new Request('http://localhost/api/v1/admin/auth/login', {
       method: 'POST', headers: { origin, 'content-type': 'application/json' },
       body: JSON.stringify({ nickname: '지표운영자', password: 'admin-password-123', totp: totp(admin.totpSecret, new Date()) }),
@@ -119,5 +121,51 @@ describeWithDb('anonymous experiment events', () => {
     expect(data.data.signupCompleted).toBe(1);
     expect(data.data.memberLettersByBridge).toContainEqual({ bridgeId: 'bongnim', count: 1 });
     expect(data.data.activeReactionsByBridge).toContainEqual({ bridgeId: 'bongnim', count: 1 });
+  });
+
+  it('filters events and trusted activity to a half-open reporting period', async () => {
+    const userId = randomUUID();
+    const questionId = randomUUID();
+    const letterId = randomUUID();
+    await client.query(`INSERT INTO users
+      (id, nickname, nickname_key, password_hash, recovery_code_hash, role, status, created_at)
+      VALUES ($1, '기간조회회원', '기간조회회원', 'hash', 'recovery', 'member', 'active', '2025-01-15T00:00:00Z')`, [userId]);
+    await client.query(`INSERT INTO questions (id, bridge_id, body, effective_at, status)
+      VALUES ($1, 'sillim', '질문', '2025-01-01T00:00:00Z', 'published')`, [questionId]);
+    await client.query(`INSERT INTO letters
+      (id, bridge_id, question_id, author_user_id, display_nickname, body, theme, is_seed, status, created_at)
+      VALUES ($1, 'sillim', $2, $3, '기간조회회원', '기간 안의 편지', 1, false, 'published', '2025-01-16T00:00:00Z')`,
+    [letterId, questionId, userId]);
+    await client.query(`INSERT INTO reactions (id, letter_id, user_id, active, activated_at)
+      VALUES ($1, $2, $3, true, '2025-01-17T00:00:00Z')`, [randomUUID(), letterId, userId]);
+    await client.query(`INSERT INTO metric_events (id, event_type, bridge_id, created_at)
+      VALUES ($1, 'survey_open', 'sillim', '2025-01-18T00:00:00Z')`, [randomUUID()]);
+    const url = new URL('http://localhost/api/v1/admin/metrics');
+    url.searchParams.set('from', '2025-01-01T00:00:00.000Z');
+    url.searchParams.set('to', '2025-02-01T00:00:00.000Z');
+    const report = await app(new Request(url, { headers: { cookie: adminCookie } }));
+    expect(report.status).toBe(200);
+    expect((await report.json()) as { data: unknown }).toMatchObject({ data: {
+      signupCompleted: 1, memberLettersByBridge: [{ bridgeId: 'sillim', count: 1 }],
+      activeReactionsByBridge: [{ bridgeId: 'sillim', count: 1 }],
+      surveyOpens: [{ bridgeId: 'sillim', count: 1 }],
+    } });
+    const invalid = await app(new Request('http://localhost/api/v1/admin/metrics?from=2025-02-01T00%3A00%3A00.000Z&to=2025-01-01T00%3A00%3A00.000Z',
+      { headers: { cookie: adminCookie } }));
+    expect(invalid.status).toBe(400);
+  });
+
+  it('does not count survey clicks after the campaign is disabled', async () => {
+    await client.query('UPDATE survey_campaign SET enabled = false WHERE id = 1');
+    const response = await app(new Request('http://localhost/api/v1/events/survey-open', {
+      method: 'POST', headers: { origin, 'content-type': 'application/json' },
+      body: JSON.stringify({ eventId: randomUUID(), bridgeId: 'sillim' }),
+    }));
+    expect(response.status).toBe(409);
+    const bypass = await app(new Request('http://localhost/api/v1/events', {
+      method: 'POST', headers: { origin, 'content-type': 'application/json' },
+      body: JSON.stringify({ eventId: randomUUID(), eventType: 'survey_open', bridgeId: 'sillim' }),
+    }));
+    expect(bypass.status).toBe(400);
   });
 });

@@ -8,14 +8,37 @@ export class MetricsError extends Error {
 export class PostgresMetricsService {
   constructor(private readonly db: Pool | PoolClient) {}
 
-  async surveyOpen(eventId: unknown, bridgeId: unknown, source: string) {
-    return this.record(eventId, 'survey_open', bridgeId, null, source);
+  private period(fromInput: string | null, toInput: string | null): [Date | null, Date | null] {
+    if (fromInput === null && toInput === null) return [null, null];
+    const valid = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+    if (!fromInput || !toInput || !valid.test(fromInput) || !valid.test(toInput)) {
+      throw new MetricsError(400, 'INVALID_PERIOD', '조회 기간을 확인해 주세요.');
+    }
+    const from = new Date(fromInput);
+    const to = new Date(toInput);
+    if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) {
+      throw new MetricsError(400, 'INVALID_PERIOD', '조회 기간을 확인해 주세요.');
+    }
+    return [from, to];
+  }
+
+  async surveyOpen(eventId: unknown, bridgeId: unknown, source: string, now: Date) {
+    const active = await this.db.query(
+      `SELECT id FROM survey_campaign WHERE id = 1 AND enabled = true
+       AND starts_at <= $1 AND ends_at > $1`, [now],
+    );
+    if (!active.rows[0]) throw new MetricsError(409, 'SURVEY_CLOSED', '설문 기간이 아닙니다.');
+    return this.recordEvent(eventId, 'survey_open', bridgeId, null, source);
   }
 
   async record(eventId: unknown, eventType: unknown, bridgeIdInput: unknown, letterId: unknown, source: string) {
-    if (!['survey_open', 'qr_entry', 'letter_open', 'five_reached', 'signup_start', 'write_start'].includes(String(eventType))) {
+    if (!['qr_entry', 'letter_open', 'five_reached', 'signup_start', 'write_start'].includes(String(eventType))) {
       throw new MetricsError(400, 'INVALID_EVENT_TYPE', '이벤트 종류를 확인해 주세요.');
     }
+    return this.recordEvent(eventId, eventType, bridgeIdInput, letterId, source);
+  }
+
+  private async recordEvent(eventId: unknown, eventType: unknown, bridgeIdInput: unknown, letterId: unknown, source: string) {
     if (typeof eventId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(eventId)) {
       throw new MetricsError(400, 'INVALID_EVENT_ID', '이벤트 식별값을 확인해 주세요.');
     }
@@ -74,24 +97,40 @@ export class PostgresMetricsService {
     }
   }
 
-  async summary() {
+  async summary(fromInput: string | null = null, toInput: string | null = null) {
+    const [from, to] = this.period(fromInput, toInput);
     const result = await this.db.query<{ bridge_id: string | null; count: number }>(
         `SELECT bridge_id, count(*)::int AS count FROM metric_events
-         WHERE event_type = 'survey_open' GROUP BY bridge_id ORDER BY bridge_id NULLS FIRST`,
+         WHERE event_type = 'survey_open'
+           AND ($1::timestamptz IS NULL OR created_at >= $1)
+           AND ($2::timestamptz IS NULL OR created_at < $2)
+         GROUP BY bridge_id ORDER BY bridge_id NULLS FIRST`, [from, to],
     );
     const funnel = await this.db.query<{ bridge_id: string; event_type: string; letter_kind: string | null; count: number }>(
         `SELECT bridge_id, event_type, letter_kind, count(*)::int AS count
          FROM metric_events WHERE bridge_id IS NOT NULL AND event_type <> 'survey_open'
-         GROUP BY bridge_id, event_type, letter_kind ORDER BY bridge_id, event_type, letter_kind`,
+           AND ($1::timestamptz IS NULL OR created_at >= $1)
+           AND ($2::timestamptz IS NULL OR created_at < $2)
+         GROUP BY bridge_id, event_type, letter_kind ORDER BY bridge_id, event_type, letter_kind`, [from, to],
     );
-    const signups = await this.db.query<{ count: number }>(`SELECT count(*)::int AS count FROM users WHERE role = 'member'`);
+    const signups = await this.db.query<{ count: number }>(
+      `SELECT count(*)::int AS count FROM users WHERE role = 'member'
+         AND ($1::timestamptz IS NULL OR created_at >= $1)
+         AND ($2::timestamptz IS NULL OR created_at < $2)`, [from, to],
+    );
     const letters = await this.db.query<{ bridge_id: string; count: number }>(
         `SELECT bridge_id, count(*)::int AS count FROM letters
-         WHERE is_seed = false AND status <> 'deleted' GROUP BY bridge_id ORDER BY bridge_id`,
+         WHERE is_seed = false AND status <> 'deleted'
+           AND ($1::timestamptz IS NULL OR created_at >= $1)
+           AND ($2::timestamptz IS NULL OR created_at < $2)
+         GROUP BY bridge_id ORDER BY bridge_id`, [from, to],
     );
     const reactions = await this.db.query<{ bridge_id: string; count: number }>(
         `SELECT l.bridge_id, count(*)::int AS count FROM reactions r JOIN letters l ON l.id = r.letter_id
-         WHERE r.active = true AND l.status = 'published' GROUP BY l.bridge_id ORDER BY l.bridge_id`,
+         WHERE r.active = true AND l.status = 'published'
+           AND ($1::timestamptz IS NULL OR r.activated_at >= $1)
+           AND ($2::timestamptz IS NULL OR r.activated_at < $2)
+         GROUP BY l.bridge_id ORDER BY l.bridge_id`, [from, to],
     );
     return {
       surveyOpens: result.rows.map((row) => ({ bridgeId: row.bridge_id, count: row.count })),

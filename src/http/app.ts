@@ -7,6 +7,7 @@ import { ReportError, type PostgresReportService } from '../domains/reports';
 import { InquiryError, type PostgresInquiryService } from '../domains/inquiries';
 import { AdminError, type PostgresAdminService } from '../domains/admin';
 import { MetricsError, type PostgresMetricsService } from '../domains/metrics';
+import { SurveyError, type PostgresSurveyService } from '../domains/survey';
 
 const MAX_BODY_BYTES = 16 * 1024;
 
@@ -22,6 +23,7 @@ export interface AppOptions {
   inquiries?: PostgresInquiryService;
   admin?: PostgresAdminService;
   metrics?: PostgresMetricsService;
+  survey?: PostgresSurveyService;
   allowedOrigins?: string[];
   secureCookies?: boolean;
   now?: () => Date;
@@ -166,8 +168,12 @@ export function createApp(options: AppOptions = {}) {
         if (!options.metrics) return send(503, { error: { code: 'SERVICE_UNAVAILABLE', message: '서비스를 이용할 수 없습니다.' } });
         if (!allowedOrigin) return send(403, { error: { code: 'ORIGIN_DENIED', message: '요청 출처를 확인해 주세요.' } });
         const input = payload(body);
-        const result = await options.metrics.surveyOpen(input.eventId, input.bridgeId, clientSource);
+        const result = await options.metrics.surveyOpen(input.eventId, input.bridgeId, clientSource, options.now?.() ?? new Date());
         return send(result.counted ? 201 : 200, { data: result });
+      }
+      if (request.method === 'GET' && path === '/api/v1/survey') {
+        if (!options.survey) return send(503, { error: { code: 'SERVICE_UNAVAILABLE', message: '서비스를 이용할 수 없습니다.' } });
+        return send(200, { data: await options.survey.current(options.now?.() ?? new Date()) });
       }
       if (request.method === 'POST' && path === '/api/v1/events') {
         if (!options.metrics) return send(503, { error: { code: 'SERVICE_UNAVAILABLE', message: '서비스를 이용할 수 없습니다.' } });
@@ -179,7 +185,8 @@ export function createApp(options: AppOptions = {}) {
       if (request.method === 'GET' && path === '/api/v1/admin/metrics') {
         if (!auth || !options.metrics) return send(503, { error: { code: 'SERVICE_UNAVAILABLE', message: '서비스를 이용할 수 없습니다.' } });
         await auth.authenticateAdmin(sessionCookie(request, secure));
-        return send(200, { data: await options.metrics.summary() });
+        const params = new URL(request.url).searchParams;
+        return send(200, { data: await options.metrics.summary(params.get('from'), params.get('to')) });
       }
       const adminQuestionMatch = /^\/api\/v1\/admin\/questions\/([^/]+)$/.exec(path);
       if ((request.method === 'POST' && path === '/api/v1/admin/questions') ||
@@ -197,6 +204,14 @@ export function createApp(options: AppOptions = {}) {
         if (!auth || !options.admin) return send(503, { error: { code: 'SERVICE_UNAVAILABLE', message: '서비스를 이용할 수 없습니다.' } });
         if (request.method === 'GET') {
           await auth.authenticateAdmin(sessionCookie(request, secure));
+          if (path === '/api/v1/admin/questions') return send(200, { data: await options.admin.listQuestions(options.now?.() ?? new Date()) });
+          if (path === '/api/v1/admin/seeds') {
+            return send(200, { data: await options.admin.listSeeds(new URL(request.url).searchParams.get('bridgeId')) });
+          }
+          if (path === '/api/v1/admin/survey') {
+            if (!options.survey) return send(503, { error: { code: 'SERVICE_UNAVAILABLE', message: '서비스를 이용할 수 없습니다.' } });
+            return send(200, { data: await options.survey.settings() });
+          }
           if (path === '/api/v1/admin/reports') return send(200, { data: await options.admin.listReports() });
           if (path === '/api/v1/admin/inquiries') return send(200, { data: await options.admin.listInquiries() });
           if (path === '/api/v1/admin/alerts') return send(200, { data: await options.admin.alerts() });
@@ -205,6 +220,13 @@ export function createApp(options: AppOptions = {}) {
           if (!allowedOrigin) return send(403, { error: { code: 'ORIGIN_DENIED', message: '요청 출처를 확인해 주세요.' } });
           const actor = await auth.authorizeAdmin(sessionCookie(request, secure), request.headers.get('x-csrf-token'));
           const input = payload(body);
+          if (request.method === 'PUT' && path === '/api/v1/admin/survey') {
+            if (!options.survey) return send(503, { error: { code: 'SERVICE_UNAVAILABLE', message: '서비스를 이용할 수 없습니다.' } });
+            return send(200, { data: await options.survey.configure({
+              url: input.url, startsAt: input.startsAt, endsAt: input.endsAt,
+              enabled: input.enabled, reason: input.reason,
+            }, actor.id) });
+          }
           if (request.method === 'POST' && path === '/api/v1/admin/seeds') {
             return send(201, { data: await options.admin.createSeed(input.bridgeId, input.body, input.theme, input.displayNickname, actor.id) });
           }
@@ -357,6 +379,7 @@ export function createApp(options: AppOptions = {}) {
       if (error instanceof InquiryError) return send(error.status, { error: { code: error.code, message: error.message } });
       if (error instanceof AdminError) return send(error.status, { error: { code: error.code, message: error.message } });
       if (error instanceof MetricsError) return send(error.status, { error: { code: error.code, message: error.message } });
+      if (error instanceof SurveyError) return send(error.status, { error: { code: error.code, message: error.message } });
       return send(500, { error: { code: 'INTERNAL_ERROR', message: '요청을 처리하지 못했습니다.' } });
     }
   };
