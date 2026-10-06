@@ -1,4 +1,6 @@
 node_modules/
 dist/
+build/
+.gradle/
 .env*
 !.env.example

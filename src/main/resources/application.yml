@@ -1,0 +1,14 @@
+server:
+  port: ${PORT:3000}
+  max-http-request-header-size: 16KB
+
+spring:
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://127.0.0.1:5432/starlight_dev}
+    username: ${DATABASE_USERNAME:}
+    password: ${DATABASE_PASSWORD:}
+  flyway:
+    baseline-on-migrate: true
+    baseline-version: 14
+    baseline-description: Node.js schema migrations
+    locations: classpath:db/migration
