@@ -64,7 +64,11 @@ describeWithDb('account API backed by PostgreSQL', () => {
     const meData = await me.json() as { data: { user: { id: string }; csrfToken: string } };
     expect(meData.data.user.id).toBe(result.data.user.id);
     expect(meData.data).not.toHaveProperty('recoveryCode');
-    expect(meData.data.csrfToken).toBeTruthy();
+    expect(meData.data.csrfToken).toBe(result.data.csrfToken);
+
+    const secondMe = await app(new Request('http://localhost/api/v1/me', { headers: { cookie: cookie.split(';')[0] } }));
+    const secondMeData = await secondMe.json() as { data: { csrfToken: string } };
+    expect(secondMeData.data.csrfToken).toBe(result.data.csrfToken);
 
     const wrong = await post('/api/v1/auth/login', { nickname: '별빛회원', password: 'wrong-password' });
     expect(wrong.status).toBe(401);

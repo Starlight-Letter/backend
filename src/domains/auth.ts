@@ -27,6 +27,7 @@ export interface PublicUser {
 interface SessionRow extends UserRow {
   session_id: string;
   csrf_hash: string;
+  csrf_token: string;
   admin_verified_at: Date | null;
 }
 
@@ -159,10 +160,10 @@ export class PostgresAuthService {
     const sessionToken = token();
     const csrfToken = token();
     await client.query(
-      `INSERT INTO sessions (id, user_id, token_hash, csrf_hash, expires_at, admin_verified_at)
-       VALUES ($1, $2, $3, $4, now() + CASE WHEN $5 THEN interval '12 hours' ELSE interval '30 days' END,
-         CASE WHEN $5 THEN now() ELSE NULL END)`,
-      [randomUUID(), userId, digest(sessionToken), digest(csrfToken), adminVerified],
+      `INSERT INTO sessions (id, user_id, token_hash, csrf_hash, csrf_token, expires_at, admin_verified_at)
+       VALUES ($1, $2, $3, $4, $5, now() + CASE WHEN $6 THEN interval '12 hours' ELSE interval '30 days' END,
+         CASE WHEN $6 THEN now() ELSE NULL END)`,
+      [randomUUID(), userId, digest(sessionToken), digest(csrfToken), csrfToken, adminVerified],
     );
     return { sessionToken, csrfToken };
   }
@@ -242,7 +243,7 @@ export class PostgresAuthService {
       throw new AuthError(401, 'LOGIN_REQUIRED', '로그인이 필요합니다.');
     }
     const result = await this.db.query<SessionRow>(
-      `SELECT s.id AS session_id, s.csrf_hash, s.admin_verified_at, u.*
+      `SELECT s.id AS session_id, s.csrf_hash, s.csrf_token, s.admin_verified_at, u.*
        FROM sessions s JOIN users u ON u.id = s.user_id
        WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now()
          AND u.status = 'active'`,
@@ -286,8 +287,9 @@ export class PostgresAuthService {
 
   async refreshCsrf(sessionToken: string | null) {
     const session = await this.session(sessionToken);
+    if (session.csrf_token) return { user: publicUser(session), csrfToken: session.csrf_token };
     const csrfToken = token();
-    await this.db.query('UPDATE sessions SET csrf_hash = $1 WHERE id = $2', [digest(csrfToken), session.session_id]);
+    await this.db.query('UPDATE sessions SET csrf_hash = $1, csrf_token = $2 WHERE id = $3', [digest(csrfToken), csrfToken, session.session_id]);
     return { user: publicUser(session), csrfToken };
   }
 

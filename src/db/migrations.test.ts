@@ -42,7 +42,7 @@ describeWithDb('PostgreSQL migrations', () => {
       { id: 'sillim2', name: '신림2교' },
     ]);
     const migrations = await client.query('SELECT count(*)::int AS count FROM schema_migrations');
-    expect(migrations.rows[0].count).toBe(13);
+    expect(migrations.rows[0].count).toBe(14);
   });
 
   it('enforces active nickname uniqueness and allows reuse after withdrawal', async () => {
