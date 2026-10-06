@@ -1,0 +1,16 @@
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: starlight_test
+      POSTGRES_USER: starlight
+      POSTGRES_PASSWORD: starlight_test_password
+    ports:
+      - "54329:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U starlight -d starlight_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    tmpfs:
+      - /var/lib/postgresql/data

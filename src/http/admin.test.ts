@@ -166,6 +166,12 @@ describeWithDb('admin question API', () => {
     expect(((await detail.json()) as { data: { body: string; theme: number } }).data)
       .toMatchObject({ body: '오늘도 고생했어요.', theme: 3 });
 
+    const lookup = await app(new Request('http://localhost/api/v1/admin/letters?query=%EA%B3%A0%EC%83%9D&bridgeId=bongnim', { headers: { cookie } }));
+    expect(lookup.status).toBe(200);
+    expect(((await lookup.json()) as { data: Array<{ id: string; body: string; bridgeId: string; status: string }> }).data)
+      .toContainEqual(expect.objectContaining({ id: letterId, body: '오늘도 고생했어요.', bridgeId: 'bongnim', status: 'published' }));
+    expect((await app(new Request('http://localhost/api/v1/admin/letters?query=%EA%B3%A0', { headers: { cookie } }))).status).toBe(422);
+
     const inquiry = await client.query<{ id: string }>(
       `INSERT INTO inquiries (id, type, body, related_letter_id, status)
        VALUES ($1, 'privacy', '개인정보가 보여요', $2, 'open') RETURNING id`, [randomUUID(), letterId],

@@ -159,6 +159,23 @@ describeWithDb('account API backed by PostgreSQL', () => {
     expect((await app(new Request('http://localhost/api/v1/me', { headers: { cookie } }))).status).toBe(401);
   });
 
+  it('changes the password and revokes the previous session', async () => {
+    const signup = await post('/api/v1/auth/signup', { nickname: '비밀번호변경', password: 'long-password-123' });
+    const created = await signup.json() as { data: { csrfToken: string } };
+    const oldCookie = signup.headers.get('set-cookie')!.split(';')[0];
+    const changed = await post('/api/v1/me/password', {
+      currentPassword: 'long-password-123', newPassword: 'new-password-456',
+    }, { cookie: oldCookie, 'x-csrf-token': created.data.csrfToken });
+    expect(changed.status).toBe(200);
+    const replacement = await changed.json() as { data: { csrfToken: string } };
+    const newCookie = changed.headers.get('set-cookie')!.split(';')[0];
+    expect(replacement.data.csrfToken).toHaveLength(43);
+    expect((await app(new Request('http://localhost/api/v1/me', { headers: { cookie: oldCookie } }))).status).toBe(401);
+    expect((await post('/api/v1/auth/login', { nickname: '비밀번호변경', password: 'long-password-123' })).status).toBe(401);
+    expect((await post('/api/v1/auth/login', { nickname: '비밀번호변경', password: 'new-password-456' })).status).toBe(200);
+    expect((await app(new Request('http://localhost/api/v1/me', { headers: { cookie: newCookie } }))).status).toBe(200);
+  });
+
   it('rejects an admin through member login and requires a fresh TOTP for an admin session', async () => {
     const admin = new PostgresAuthService(authPool, Buffer.alloc(32, 7));
     const provisioned = await admin.provisionAdmin('별빛운영자', 'admin-password-123');

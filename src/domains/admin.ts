@@ -271,6 +271,29 @@ export class PostgresAdminService {
     }));
   }
 
+  async findLetters(queryInput: string | null, bridgeId: string | null) {
+    const query = queryInput?.trim().normalize('NFC') ?? '';
+    if (Array.from(query).length < 2 || Array.from(query).length > 100) {
+      throw new AdminError(422, 'INVALID_SEARCH', '검색어는 2~100자로 입력해 주세요.');
+    }
+    const result = await this.db.query<{
+      id: string; bridge_id: string; body: string | null; display_nickname: string | null; status: string;
+      theme: number; is_seed: boolean; author_user_id: string | null; question_id: string | null; created_at: Date;
+    }>(
+      `SELECT id, bridge_id, body, display_nickname, status, theme, is_seed, author_user_id, question_id, created_at
+       FROM letters
+       WHERE ($2::text IS NULL OR bridge_id = $2)
+         AND (id::text = $1 OR body ILIKE '%' || $1 || '%' OR display_nickname ILIKE '%' || $1 || '%')
+       ORDER BY created_at DESC, id DESC
+       LIMIT 50`, [query, bridgeId],
+    );
+    return result.rows.map((row) => ({
+      id: row.id, bridgeId: row.bridge_id, body: row.body, displayNickname: row.display_nickname,
+      status: row.status, theme: row.theme, isSeed: row.is_seed, authorUserId: row.author_user_id,
+      questionId: row.question_id, createdAt: row.created_at.toISOString(),
+    }));
+  }
+
   async alerts() {
     const inquiries = await this.db.query<{ count: number }>(
         `SELECT count(*)::int AS count FROM inquiries

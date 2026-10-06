@@ -318,6 +318,34 @@ export class PostgresAuthService {
     });
   }
 
+  async changePassword(
+    sessionToken: string | null,
+    csrfToken: string | null,
+    currentPasswordInput: unknown,
+    newPasswordInput: unknown,
+  ) {
+    const user = await this.authorizeMutation(sessionToken, csrfToken);
+    const currentPassword = validPassword(currentPasswordInput);
+    const newPassword = validPassword(newPasswordInput);
+    if (currentPassword === newPassword) {
+      throw new AuthError(400, 'INVALID_PASSWORD', '새 비밀번호는 현재 비밀번호와 다르게 입력해 주세요.');
+    }
+    return this.transaction(async (client) => {
+      const found = await client.query<UserRow>(
+        `SELECT * FROM users WHERE id = $1 AND status = 'active' FOR UPDATE`, [user.id],
+      );
+      const account = found.rows[0];
+      if (!account || !await argon2.verify(account.password_hash, currentPassword)) {
+        throw new AuthError(401, 'INVALID_CREDENTIALS', '비밀번호를 확인해 주세요.');
+      }
+      const passwordHash = await argon2.hash(newPassword, HASH_OPTIONS);
+      await client.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, user.id]);
+      await client.query('UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL', [user.id]);
+      const session = await this.newSession(client, user.id);
+      return { user: publicUser(account), ...session };
+    });
+  }
+
   async withdraw(sessionToken: string | null, csrfToken: string | null, passwordInput: unknown): Promise<void> {
     const user = await this.authorizeMutation(sessionToken, csrfToken);
     const password = validPassword(passwordInput);

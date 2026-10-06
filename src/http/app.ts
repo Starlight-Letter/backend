@@ -208,6 +208,10 @@ export function createApp(options: AppOptions = {}) {
           if (path === '/api/v1/admin/seeds') {
             return send(200, { data: await options.admin.listSeeds(new URL(request.url).searchParams.get('bridgeId')) });
           }
+          if (path === '/api/v1/admin/letters') {
+            const params = new URL(request.url).searchParams;
+            return send(200, { data: await options.admin.findLetters(params.get('query'), params.get('bridgeId')) });
+          }
           if (path === '/api/v1/admin/survey') {
             if (!options.survey) return send(503, { error: { code: 'SERVICE_UNAVAILABLE', message: '서비스를 이용할 수 없습니다.' } });
             return send(200, { data: await options.survey.settings() });
@@ -272,6 +276,15 @@ export function createApp(options: AppOptions = {}) {
           sessionCookie(request, secure), request.headers.get('x-csrf-token'), input.password,
         );
         return send(200, { data: result });
+      }
+      if (auth && request.method === 'POST' && path === '/api/v1/me/password') {
+        const input = payload(body);
+        const result = await auth.changePassword(
+          sessionCookie(request, secure), request.headers.get('x-csrf-token'), input.currentPassword, input.newPassword,
+        );
+        const response = send(200, { data: { user: result.user, csrfToken: result.csrfToken } });
+        setSessionCookie(response, result.sessionToken, secure);
+        return response;
       }
       if (auth && request.method === 'POST' && path === '/api/v1/me/withdraw') {
         const input = payload(body);

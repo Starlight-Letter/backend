@@ -10,7 +10,7 @@
 - 로컬 HTTP 서버와 API Gateway HTTP API 이벤트용 Lambda 진입점
 - 16 KiB 요청 본문 제한, 공통 성공·오류 응답 형식
 
-닉네임·비밀번호 가입/로그인/복구 코드/탈퇴, 편지 작성·강물·상세, 반응·보관·현재 베스트, 회원 신고 5건 자동 숨김, 비공개 문의 API를 로컬 PostgreSQL에 구현했습니다. 운영자 전용 로그인(TOTP), 질문 예약·즉시 등록·정정, 시작 편지 등록, 신고 검토·숨김·복원·삭제, 문의 목록·상태 처리와 감사 기록도 구현했습니다. 삭제할 때 본문·표시 닉네임과 보관·반응 데이터는 제거하고 별도 DB 삭제 기록을 남깁니다.
+닉네임·비밀번호 가입/로그인/비밀번호 변경/복구 코드/탈퇴, 편지 작성·강물·상세, 반응·보관·현재 베스트, 회원 신고 5건 자동 숨김, 비공개 문의 API를 로컬 PostgreSQL에 구현했습니다. 운영자 전용 로그인(TOTP), 질문 예약·즉시 등록·정정, 시작 편지 등록, 신고 검토·숨김·복원·삭제, 문의 목록·상태 처리와 감사 기록도 구현했습니다. 운영자는 신고 목록에 없는 편지도 내용·표시 이름·다리 기준으로 검색해 조치할 수 있습니다. 삭제할 때 본문·표시 닉네임과 보관·반응 데이터는 제거하고 별도 DB 삭제 기록을 남깁니다.
 
 시작 편지 수정, 운영자 지정 금칙 문구, 비회원 설문 클릭과 QR·편지 열람 익명 지표, 실제 DB 기반 가입·회원 편지·활성 반응 집계, 운영자 TOTP 오프라인 재설정도 구현했습니다. 운영자 우선 확인 건수 API로 미처리 개인정보 문의·신고 편지·숨김 편지 수를 조회할 수 있습니다. 운영자는 현재·예약 질문과 미등록 다리, 공개·숨김 시작 편지를 조회할 수 있고 설문 링크·기간을 등록할 수 있습니다. 설문 버튼은 기간 밖에서 자동으로 숨겨지며 기간 밖 클릭은 집계하지 않습니다. 아직 신고·개인정보 문의의 외부 자동 알림, 삭제 이력의 S3 이중 보관, AWS 인프라는 구현되지 않았습니다. PostgreSQL 엔진은 확정했지만 Aurora 상품과 AWS 연결 방식은 비용·성능 검증이 남아 있습니다. 현재 Lambda 진입점은 직접 PostgreSQL 연결을 사용하며 AWS 배포용 네트워크·비밀값 구성은 없습니다.
 
@@ -33,7 +33,7 @@ DATABASE_URL=postgresql://localhost:5432/starlight_dev APP_ORIGIN=http://localho
 
 운영자 계정은 공개 가입으로 만들 수 없습니다. 개발 DB에 마이그레이션을 적용한 뒤 32바이트 비밀키를 base64로 만들어 `ADMIN_TOTP_KEY`에 지정하고, `ADMIN_NICKNAME`·`ADMIN_PASSWORD`와 함께 `npm run admin:provision`을 실행합니다. 출력되는 TOTP 비밀값은 최초 한 번만 안전하게 보관하고 인증 앱에 등록합니다. 인증 앱을 잃어버린 경우 DB 관리 권한이 있는 로컬 셸에서 동일한 키와 닉네임으로 `npm run admin:reset-totp`를 실행합니다. 이 작업은 기존 운영자 세션을 모두 폐기하고 새 TOTP 비밀값을 한 번 출력합니다. 서버 실행 때도 같은 `ADMIN_TOTP_KEY`가 필요합니다. 키가 없거나 바뀌면 운영자 로그인을 사용할 수 없습니다. 운영자 로그인 경로는 `POST /api/v1/admin/auth/login`이며 12시간 세션을 발급합니다.
 
-운영자 관리 API는 `/api/v1/admin/questions`, `/api/v1/admin/seeds`, `/api/v1/admin/reports`, `/api/v1/admin/letters/:id/review`, `/api/v1/admin/inquiries`, `/api/v1/admin/moderation-rules`, `/api/v1/admin/metrics`, `/api/v1/admin/alerts`, `/api/v1/admin/survey` 아래에 있습니다. 변경 요청에는 허용된 `Origin`, 운영자 세션 쿠키와 `x-csrf-token`이 필요합니다. 공개 `GET /api/v1/survey`는 현재 설문 노출 여부와 기간 중 링크를 반환합니다. 운영자는 `PUT /api/v1/admin/survey`로 HTTPS 링크와 UTC 시작·종료 시각을 설정합니다. 설정 전에는 설문이 보이지 않습니다. `POST /api/v1/events/survey-open`은 클릭만 집계하고 설문 완료를 뜻하지 않습니다. `POST /api/v1/events`는 QR 진입, 편지 열람 등 익명 퍼널 이벤트를 받습니다. `GET /api/v1/admin/metrics`는 기본 누적 수치이며 `from`·`to`(UTC ISO 시각)를 함께 보내면 `[from, to)` 기간만 조회합니다.
+운영자 관리 API는 `/api/v1/admin/questions`, `/api/v1/admin/seeds`, `/api/v1/admin/reports`, `/api/v1/admin/letters?query=...`, `/api/v1/admin/letters/:id/review`, `/api/v1/admin/inquiries`, `/api/v1/admin/moderation-rules`, `/api/v1/admin/metrics`, `/api/v1/admin/alerts`, `/api/v1/admin/survey` 아래에 있습니다. 변경 요청에는 허용된 `Origin`, 운영자 세션 쿠키와 `x-csrf-token`이 필요합니다. 공개 `GET /api/v1/survey`는 현재 설문 노출 여부와 기간 중 링크를 반환합니다. 운영자는 `PUT /api/v1/admin/survey`로 HTTPS 링크와 UTC 시작·종료 시각을 설정합니다. 설정 전에는 설문이 보이지 않습니다. `POST /api/v1/events/survey-open`은 클릭만 집계하고 설문 완료를 뜻하지 않습니다. `POST /api/v1/events`는 QR 진입, 편지 열람 등 익명 퍼널 이벤트를 받습니다. `GET /api/v1/admin/metrics`는 기본 누적 수치이며 `from`·`to`(UTC ISO 시각)를 함께 보내면 `[from, to)` 기간만 조회합니다.
 
 서버 주소는 기본 `http://127.0.0.1:3000`입니다. 질문을 아직 등록하지 않았다면 다리 응답의 `currentQuestion`은 `null`입니다. DB 통합 테스트는 별도의 이름이 `_test`로 끝나는 DB에서 실행합니다:
 
@@ -43,4 +43,12 @@ DATABASE_URL=postgresql://localhost:5432/starlight_dev APP_ORIGIN=http://localho
 
 ```bash
 TEST_DATABASE_URL=postgresql://localhost:5432/starlight_test npm test
+```
+
+Docker를 실행할 수 있는 환경에서는 저장소에 포함된 일회성 테스트 DB를 사용해 같은 통합 테스트를 실행할 수 있습니다.
+
+```bash
+docker compose -f docker-compose.test.yml up -d --wait
+TEST_DATABASE_URL=postgresql://starlight:starlight_test_password@127.0.0.1:54329/starlight_test npm test
+docker compose -f docker-compose.test.yml down --volumes
 ```
