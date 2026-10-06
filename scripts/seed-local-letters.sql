@@ -1,5 +1,12 @@
 -- Local preview content only. Replace with reviewed launch content through the admin console.
--- Repeatable: fixed UUIDs keep the same letters when this file is run again.
+-- Repeatable: fixed UUIDs keep the same records when this file is run again.
+-- The effective date is the start of this week in Korea (KST).
+INSERT INTO questions (id, bridge_id, body, effective_at, status) VALUES
+  ('00000000-0000-4000-8000-000000000101', 'bongnim', '오늘 누군가에게 건네고 싶은 다정한 한마디는 무엇인가요?', date_trunc('week', now() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul', 'published'),
+  ('00000000-0000-4000-8000-000000000102', 'sillim', '오늘의 나에게 어떤 응원을 들려주고 싶나요?', date_trunc('week', now() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul', 'published'),
+  ('00000000-0000-4000-8000-000000000103', 'sillim2', '지금의 나에게 가장 필요했던 안부는 무엇인가요?', date_trunc('week', now() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul', 'published')
+ON CONFLICT (id) DO NOTHING;
+
 INSERT INTO letters (id, bridge_id, display_nickname, body, theme, is_seed, status) VALUES
   ('00000000-0000-4000-8000-000000000201', 'sillim', '밤 산책자', '지금까지 온 길만큼 앞으로의 길도 천천히 걸어가면 돼요.', 1, true, 'published'),
   ('00000000-0000-4000-8000-000000000202', 'sillim', '별을 보는 사람', '오늘도 충분히 잘하고 있어요. 잠깐 쉬어가도 괜찮아요.', 2, true, 'published'),
