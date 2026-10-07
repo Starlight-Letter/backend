@@ -16,13 +16,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class JdbcLoginService implements LoginService {
-    private final JdbcTemplate jdbc; private final SignupValidator validator = new SignupValidator(); private final PasswordHasher hasher = new PasswordHasher(); private final SecureRandom random = new SecureRandom();
-    public JdbcLoginService(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    private final JdbcTemplate jdbc; private final RequestRateLimiter limiter; private final SignupValidator validator = new SignupValidator(); private final PasswordHasher hasher = new PasswordHasher(); private final SecureRandom random = new SecureRandom();
+    public JdbcLoginService(JdbcTemplate jdbc, RequestRateLimiter limiter) { this.jdbc = jdbc; this.limiter=limiter; }
     @Override @Transactional public SignupResult login(String nicknameInput, String passwordInput) {
-        var nickname = validator.nickname(nicknameInput); String password = validator.password(passwordInput);
+        var nickname = validator.nickname(nicknameInput); String password = validator.password(passwordInput); limiter.consume("login-account",nickname.key(),5);
         var users = jdbc.query("select id,nickname,password_hash from users where nickname_key=? and status='active' and role='member'", (row, i) -> new String[]{row.getString("id"),row.getString("nickname"),row.getString("password_hash")}, nickname.key());
         if (users.isEmpty() || !hasher.matches(users.get(0)[2], password)) throw new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", "닉네임 또는 비밀번호를 확인해 주세요.");
-        String session=token(), csrf=token();
+        limiter.clear("login-account",nickname.key()); String session=token(), csrf=token();
         jdbc.update("insert into sessions (id,user_id,token_hash,csrf_hash,csrf_token,expires_at) values (?::uuid,?::uuid,?,?,?,now()+interval '30 days')", UUID.randomUUID().toString(),users.get(0)[0],digest(session),digest(csrf),csrf);
         return new SignupResult(users.get(0)[0],users.get(0)[1],null,csrf,session);
     }

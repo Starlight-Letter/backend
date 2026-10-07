@@ -18,10 +18,10 @@ import com.starlight.greetings.domain.auth.PasswordHasher;
 @Service
 public class JdbcSignupService implements SignupService {
     private final JdbcTemplate jdbc; private final SignupValidator validator = new SignupValidator();
-    private final PasswordHasher passwords = new PasswordHasher(); private final SecureRandom random = new SecureRandom();
-    public JdbcSignupService(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    private final PasswordHasher passwords = new PasswordHasher(); private final SecureRandom random = new SecureRandom(); private final RequestRateLimiter limiter;
+    public JdbcSignupService(JdbcTemplate jdbc, RequestRateLimiter limiter) { this.jdbc = jdbc; this.limiter=limiter; }
     @Override @Transactional public SignupResult signup(String nicknameInput, String passwordInput) {
-        var nickname = validator.nickname(nicknameInput); String password = validator.password(passwordInput);
+        var nickname = validator.nickname(nicknameInput); String password = validator.password(passwordInput); limiter.consume("signup-account",nickname.key(),5);
         String id = UUID.randomUUID().toString(), recovery = token(), session = token(), csrf = token();
         try {
             jdbc.update("insert into users (id,nickname,nickname_key,password_hash,recovery_code_hash,role,status) values (?::uuid,?,?,?,?, 'member','active')", id, nickname.display(), nickname.key(), passwords.hash(password), passwords.hash(recovery));
