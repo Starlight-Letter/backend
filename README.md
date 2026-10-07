@@ -35,7 +35,7 @@ ADMIN_NICKNAME=운영자 ADMIN_PASSWORD='안전한비밀번호' \
 ./gradlew bootRun --args='--starlight.provision-admin=true'
 ```
 
-콘솔에 한 번만 출력되는 TOTP 비밀값을 인증 앱에 등록합니다. 앱 실행 때도 같은 `ADMIN_TOTP_KEY`를 유지해야 운영자 로그인이 가능합니다.
+콘솔에 한 번만 출력되는 TOTP 비밀값을 인증 앱에 등록합니다. 앱 실행 때도 같은 `ADMIN_TOTP_KEY`를 유지해야 운영자 로그인이 가능합니다. 인증 앱을 잃어버린 경우 `ADMIN_NICKNAME`과 같은 키를 설정하고 `./gradlew bootRun --args='--starlight.reset-admin-totp=true'`를 실행합니다. 기존 운영자 세션은 폐기됩니다.
 
 ## 테스트
 
