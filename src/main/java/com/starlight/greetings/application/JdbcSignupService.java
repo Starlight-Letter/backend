@@ -24,8 +24,8 @@ public class JdbcSignupService implements SignupService {
         var nickname = validator.nickname(nicknameInput); String password = validator.password(passwordInput);
         String id = UUID.randomUUID().toString(), recovery = token(), session = token(), csrf = token();
         try {
-            jdbc.update("insert into users (id,nickname,nickname_key,password_hash,recovery_code_hash,role,status) values (?,?,?,?,?,'member','active')", id, nickname.display(), nickname.key(), passwords.hash(password), passwords.hash(recovery));
-            jdbc.update("insert into sessions (id,user_id,token_hash,csrf_hash,csrf_token,expires_at) values (?,?,?,?,?,now()+interval '30 days')", UUID.randomUUID().toString(), id, digest(session), digest(csrf), csrf);
+            jdbc.update("insert into users (id,nickname,nickname_key,password_hash,recovery_code_hash,role,status) values (?::uuid,?,?,?,?, 'member','active')", id, nickname.display(), nickname.key(), passwords.hash(password), passwords.hash(recovery));
+            jdbc.update("insert into sessions (id,user_id,token_hash,csrf_hash,csrf_token,expires_at) values (?::uuid,?::uuid,?,?,?,now()+interval '30 days')", UUID.randomUUID().toString(), id, digest(session), digest(csrf), csrf);
         } catch (DuplicateKeyException error) { throw new ApiException(HttpStatus.CONFLICT, "NICKNAME_TAKEN", "이미 사용 중인 닉네임입니다."); }
         return new SignupResult(id, nickname.display(), recovery, csrf, session);
     }
