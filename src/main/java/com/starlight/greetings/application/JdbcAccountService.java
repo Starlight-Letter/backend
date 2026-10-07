@@ -16,15 +16,15 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class JdbcAccountService implements AccountService {
- private final JdbcTemplate jdbc; private final PasswordHasher hashes = new PasswordHasher(); private final SignupValidator validator = new SignupValidator(); private final SecureRandom random = new SecureRandom();
- public JdbcAccountService(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+ private final JdbcTemplate jdbc; private final RequestRateLimiter limiter; private final PasswordHasher hashes = new PasswordHasher(); private final SignupValidator validator = new SignupValidator(); private final SecureRandom random = new SecureRandom();
+ public JdbcAccountService(JdbcTemplate jdbc, RequestRateLimiter limiter) { this.jdbc = jdbc; this.limiter=limiter; }
  @Transactional @Override public String recover(String nicknameInput, String recoveryCode, String newPasswordInput) {
-  var nickname = validator.nickname(nicknameInput); String newPassword = validator.password(newPasswordInput);
+  var nickname = validator.nickname(nicknameInput); String newPassword = validator.password(newPasswordInput); limiter.consume("recover-account",nickname.key(),5);
   if (recoveryCode == null) throw invalidRecovery();
   var users = jdbc.query("select id,recovery_code_hash from users where nickname_key=? and status='active' for update", (rs,i) -> new String[] {rs.getString(1),rs.getString(2)}, nickname.key());
   if (users.isEmpty() || !hashes.matches(users.get(0)[1], recoveryCode)) throw invalidRecovery();
   String code=token(); jdbc.update("update users set password_hash=?, recovery_code_hash=? where id=?::uuid", hashes.hash(newPassword), hashes.hash(code), users.get(0)[0]);
-  jdbc.update("update sessions set revoked_at=now() where user_id=?::uuid and revoked_at is null", users.get(0)[0]); return code;
+  jdbc.update("update sessions set revoked_at=now() where user_id=?::uuid and revoked_at is null", users.get(0)[0]); limiter.clear("recover-account",nickname.key()); return code;
  }
  @Transactional @Override public String rotateRecoveryCode(String userId, String passwordInput) {
   String password=validator.password(passwordInput); var users=jdbc.query("select password_hash from users where id=?::uuid and status='active' for update",(rs,i)->rs.getString(1),userId);
