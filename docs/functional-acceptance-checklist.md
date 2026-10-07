@@ -97,4 +97,4 @@
 - 테스트 환경: PostgreSQL(`starlight_test`)과 Spring Boot API(`127.0.0.1:3002`)를 연결해 HTTP 요청으로 확인했다.
 - 통과 흐름: 비회원 공개 조회, 회원가입, 중복 닉네임 거부, 로그인·로그아웃, CSRF 거부, 편지 작성, 같은 요청 재시도, 요청 키 충돌, 반응·보관 토글, 중복 신고 거부, 주간·월간 베스트, 익명 서비스 문의, 없는 다리·편지 오류, 일반 회원의 운영 API 차단.
 - 수정 사항: Origin·본문 크기 제한을 필터가 직접 반환할 때 UTF-8을 지정하지 않아 한글 오류 메시지가 깨지는 문제를 수정했고, 재검증했다.
-- 자동 회귀: `TEST_DATABASE_URL`을 지정한 `./gradlew test --no-daemon --offline`이 통과했다. 프론트 Vitest는 기존 통과 결과가 있으며, 화면 시나리오 재검증은 아래 대기 항목과 함께 수행한다.
+- 자동 회귀: `TEST_DATABASE_URL`을 지정한 `./gradlew test --no-daemon --offline`, `npm test -- --run`(16개), `npm run build`가 모두 통과했다. 화면 시나리오 재검증은 아래 대기 항목과 함께 수행한다.
