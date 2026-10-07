@@ -1,21 +1,21 @@
-# Node.js → Spring Boot 이관 점검
+# Node.js → Spring Boot 이관 완료 기록
 
-## 이관 완료
+## Spring Boot로 이관된 기능
 
 - 공개 다리·질문·편지·설문 API
 - 회원 가입·로그인·세션·복구·탈퇴
 - 편지 작성·시작 편지·강물·상세·반응·보관·베스트
+- 중복 제출 재시도 구분
+- 기본 욕설·광고·개인정보 콘텐츠 검사와 운영자 검사 규칙
 - 신고·문의·운영자 편지 조치
-- 운영자 TOTP 로그인, 질문·시작 편지·문의·검사 규칙·설문·지표·알림
-- PostgreSQL Flyway 마이그레이션과 관리자 초기 생성 도구
-- 기본 욕설·광고·개인정보 콘텐츠 검사
+- 운영자 TOTP 로그인·초기 생성·재발급
+- 질문·시작 편지·문의·검사 규칙·설문·지표·알림 운영 API
+- PostgreSQL Flyway 마이그레이션, 요청 제한, Origin 및 요청 본문 크기 보호
 
-## Node 제거 전 남은 동등성 작업
+## 제거된 Node.js 구성
 
-1. 비밀번호 복구·문의·이벤트의 출처별 요청 제한을 회원 인증과 같은 수준으로 정리
-2. 운영자 TOTP 재발급 명령 이관
-3. AWS Lambda 진입점은 Spring Boot 배포 방식으로 대체하거나 삭제
-4. 실제 PostgreSQL 통합 테스트에서 모든 UUID 입력 경로와 관리자 전체 흐름 점검
-5. idempotency 재시도 시 `200` 반환과 재사용 여부 응답 이관
+- TypeScript 도메인·HTTP 서버·Lambda 핸들러
+- Node 패키지와 TypeScript 설정
+- 중복 SQL 마이그레이션과 Node 전용 스크립트·테스트
 
-위 항목을 완료하고 Spring API와 프론트 전체 흐름을 검증한 뒤 Node.js 소스, `package.json`, TypeScript 설정과 Lambda 핸들러를 제거한다.
+백엔드는 이제 Java 17, Spring Boot, Gradle, PostgreSQL만 사용한다.
