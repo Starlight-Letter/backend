@@ -13,8 +13,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/auth")
 public class AuthController {
     private final SignupService signupService;
-    private final com.starlight.greetings.application.LoginService loginService;
-    public AuthController(SignupService signupService, com.starlight.greetings.application.LoginService loginService) { this.signupService = signupService; this.loginService = loginService; }
+    private final com.starlight.greetings.application.LoginService loginService; private final com.starlight.greetings.application.SessionService sessions;
+    public AuthController(SignupService signupService, com.starlight.greetings.application.LoginService loginService, com.starlight.greetings.application.SessionService sessions) { this.signupService = signupService; this.loginService = loginService; this.sessions=sessions; }
 
     @PostMapping("/signup")
     public ResponseEntity<ApiEnvelope<Map<String, Object>>> signup(@RequestBody Map<String, String> body) {
@@ -30,4 +30,5 @@ public class AuthController {
         return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, "star_session_dev=" + result.sessionToken() + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000")
             .body(ApiEnvelope.of(Map.of("user", Map.of("id", result.id(), "nickname", result.nickname(), "role", "member"), "csrfToken", result.csrfToken())));
     }
+    @PostMapping("/logout") public ResponseEntity<ApiEnvelope<Map<String,Boolean>>> logout(jakarta.servlet.http.HttpServletRequest request,@org.springframework.web.bind.annotation.RequestHeader(value="x-csrf-token",required=false) String csrf){String token=null;if(request.getCookies()!=null)for(var c:request.getCookies())if("star_session_dev".equals(c.getName()))token=c.getValue();sessions.logout(token,csrf);return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE,"star_session_dev=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0").body(ApiEnvelope.of(Map.of("loggedOut",true)));}
 }

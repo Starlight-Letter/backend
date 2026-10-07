@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.starlight.greetings.application.SignupService;
 import com.starlight.greetings.application.LoginService;
+import com.starlight.greetings.application.SessionService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -21,6 +22,7 @@ class AuthControllerTest {
     @Autowired private MockMvc mvc;
     @MockBean private SignupService signupService;
     @MockBean private LoginService loginService;
+    @MockBean private SessionService sessionService;
 
     @Test void signsUpAndIssuesTheDevelopmentSessionCookie() throws Exception {
         given(signupService.signup(any(), any())).willReturn(new SignupResult("user-1", "별빛이", "recovery", "csrf", "session"));
