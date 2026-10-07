@@ -1,54 +1,51 @@
 # 별빛안부 백엔드
 
-별빛안부의 API와 도메인 규칙을 구현하는 TypeScript 저장소입니다. 서비스 정책은 상위 작업 폴더의 `기능명세서_최종본.md`, 개발 순서는 `별빛안부_통합_구현계획서.md`를 따릅니다.
+Spring Boot 3 · Java 17 · PostgreSQL 기반의 별빛안부 API입니다.
 
-## 현재 구현
-
-- PostgreSQL 마이그레이션과 세 다리 초기 데이터
-- `GET /api/v1/health`, `GET /api/v1/bridges`, `GET /api/v1/bridges/:id`
-- 다리별 공개 질문 중 현재 시각에 적용되는 최신 질문 조회, 질문 미등록 주에는 이전 질문 유지
-- 로컬 HTTP 서버와 API Gateway HTTP API 이벤트용 Lambda 진입점
-- 16 KiB 요청 본문 제한, 공통 성공·오류 응답 형식
-
-닉네임·비밀번호 가입/로그인/비밀번호 변경/복구 코드/탈퇴, 편지 작성·강물·상세, 반응·보관·현재 베스트, 회원 신고 5건 자동 숨김, 비공개 문의 API를 로컬 PostgreSQL에 구현했습니다. 운영자 전용 로그인(TOTP), 질문 예약·즉시 등록·정정, 시작 편지 등록, 신고 검토·숨김·복원·삭제, 문의 목록·상태 처리와 감사 기록도 구현했습니다. 운영자는 신고 목록에 없는 편지도 내용·표시 이름·다리 기준으로 검색해 조치할 수 있습니다. 삭제할 때 본문·표시 닉네임과 보관·반응 데이터는 제거하고 별도 DB 삭제 기록을 남깁니다.
-
-시작 편지 수정, 운영자 지정 금칙 문구, 비회원 설문 클릭과 QR·편지 열람 익명 지표, 실제 DB 기반 가입·회원 편지·활성 반응 집계, 운영자 TOTP 오프라인 재설정도 구현했습니다. 운영자 우선 확인 건수 API로 미처리 개인정보 문의·신고 편지·숨김 편지 수를 조회할 수 있습니다. 운영자는 현재·예약 질문과 미등록 다리, 공개·숨김 시작 편지를 조회할 수 있고 설문 링크·기간을 등록할 수 있습니다. 설문 버튼은 기간 밖에서 자동으로 숨겨지며 기간 밖 클릭은 집계하지 않습니다. 아직 신고·개인정보 문의의 외부 자동 알림, 삭제 이력의 S3 이중 보관, AWS 인프라는 구현되지 않았습니다. PostgreSQL 엔진은 확정했지만 Aurora 상품과 AWS 연결 방식은 비용·성능 검증이 남아 있습니다. 현재 Lambda 진입점은 직접 PostgreSQL 연결을 사용하며 AWS 배포용 네트워크·비밀값 구성은 없습니다.
-
-## 개발 명령
+## 실행 준비
 
 ```bash
-npm ci
-npm test
-npm run build
+cp .env.example .env
 ```
 
-로컬 PostgreSQL에 전용 개발 DB를 준비한 뒤:
+`.env`에 PostgreSQL JDBC URL, 계정 정보, `ADMIN_TOTP_KEY`를 설정합니다. `ADMIN_TOTP_KEY`는 Base64로 인코딩한 32바이트 키입니다.
 
 ```bash
-DATABASE_URL=postgresql://localhost:5432/starlight_dev npm run db:migrate
-DATABASE_URL=postgresql://localhost:5432/starlight_dev APP_ORIGIN=http://localhost:5173 npm run dev
+JDBC_DATABASE_URL=jdbc:postgresql://127.0.0.1:5432/starlight_dev
+DATABASE_USERNAME=starlight
+DATABASE_PASSWORD=change-me
+ADMIN_TOTP_KEY=base64-encoded-32-byte-key
+PORT=3000
 ```
 
-화면 확인용 시작 편지가 필요하면 마이그레이션 후 `psql postgresql://localhost:5432/starlight_dev -f scripts/seed-local-letters.sql`을 실행합니다. 세 다리에 5통씩 넣는 반복 실행 가능한 **개발용 예시**이며 실제 공개 문구는 운영자 콘솔에서 별도로 검토·등록합니다.
-
-운영자 계정은 공개 가입으로 만들 수 없습니다. 개발 DB에 마이그레이션을 적용한 뒤 32바이트 비밀키를 base64로 만들어 `ADMIN_TOTP_KEY`에 지정하고, `ADMIN_NICKNAME`·`ADMIN_PASSWORD`와 함께 `npm run admin:provision`을 실행합니다. 출력되는 TOTP 비밀값은 최초 한 번만 안전하게 보관하고 인증 앱에 등록합니다. 인증 앱을 잃어버린 경우 DB 관리 권한이 있는 로컬 셸에서 동일한 키와 닉네임으로 `npm run admin:reset-totp`를 실행합니다. 이 작업은 기존 운영자 세션을 모두 폐기하고 새 TOTP 비밀값을 한 번 출력합니다. 서버 실행 때도 같은 `ADMIN_TOTP_KEY`가 필요합니다. 키가 없거나 바뀌면 운영자 로그인을 사용할 수 없습니다. 운영자 로그인 경로는 `POST /api/v1/admin/auth/login`이며 12시간 세션을 발급합니다.
-
-운영자 관리 API는 `/api/v1/admin/questions`, `/api/v1/admin/seeds`, `/api/v1/admin/reports`, `/api/v1/admin/letters?query=...`, `/api/v1/admin/letters/:id/review`, `/api/v1/admin/inquiries`, `/api/v1/admin/moderation-rules`, `/api/v1/admin/metrics`, `/api/v1/admin/alerts`, `/api/v1/admin/survey` 아래에 있습니다. 변경 요청에는 허용된 `Origin`, 운영자 세션 쿠키와 `x-csrf-token`이 필요합니다. 공개 `GET /api/v1/survey`는 현재 설문 노출 여부와 기간 중 링크를 반환합니다. 운영자는 `PUT /api/v1/admin/survey`로 HTTPS 링크와 UTC 시작·종료 시각을 설정합니다. 설정 전에는 설문이 보이지 않습니다. `POST /api/v1/events/survey-open`은 클릭만 집계하고 설문 완료를 뜻하지 않습니다. `POST /api/v1/events`는 QR 진입, 편지 열람 등 익명 퍼널 이벤트를 받습니다. `GET /api/v1/admin/metrics`는 기본 누적 수치이며 `from`·`to`(UTC ISO 시각)를 함께 보내면 `[from, to)` 기간만 조회합니다.
-
-서버 주소는 기본 `http://127.0.0.1:3000`입니다. 질문을 아직 등록하지 않았다면 다리 응답의 `currentQuestion`은 `null`입니다. DB 통합 테스트는 별도의 이름이 `_test`로 끝나는 DB에서 실행합니다:
-
-로컬 인증 쿠키 이름은 `star_session_dev`입니다. 실제 HTTPS 환경에서는 `__Host-star_session`을 사용하며, 상태를 변경하는 회원 요청은 허용된 `Origin`과 `x-csrf-token`을 요구합니다. 가입 응답의 복구 코드는 그 응답에만 포함되므로 사용자가 직접 보관해야 합니다. 현재 내용 검사는 기본 규칙이며 운영자 편집·검토 체계가 완성되기 전에는 공개 출시용 검사로 간주하지 않습니다.
-
-로그인 회원은 `GET /api/v1/letters/:id/engagement`로 자신이 해당 편지에 남긴 반응·보관 상태와 현재 반응 수를 읽을 수 있습니다. 프론트엔드는 이 상태를 불러온 뒤 반응과 보관 버튼을 활성화합니다.
+애플리케이션은 시작할 때 Flyway로 스키마를 적용합니다.
 
 ```bash
-TEST_DATABASE_URL=postgresql://localhost:5432/starlight_test npm test
+./gradlew bootRun
 ```
 
-Docker를 실행할 수 있는 환경에서는 저장소에 포함된 일회성 테스트 DB를 사용해 같은 통합 테스트를 실행할 수 있습니다.
+프론트엔드는 `VITE_API_TARGET=http://127.0.0.1:3000`을 설정한 뒤 실행합니다.
+
+## 운영자 계정 생성
+
+운영자 계정은 일반 회원가입으로 만들 수 없습니다. 다음 환경 변수를 설정한 뒤 실행합니다.
+
+```bash
+ADMIN_NICKNAME=운영자 ADMIN_PASSWORD='안전한비밀번호' \
+./gradlew bootRun --args='--starlight.provision-admin=true'
+```
+
+콘솔에 한 번만 출력되는 TOTP 비밀값을 인증 앱에 등록합니다. 앱 실행 때도 같은 `ADMIN_TOTP_KEY`를 유지해야 운영자 로그인이 가능합니다.
+
+## 테스트
 
 ```bash
 docker compose -f docker-compose.test.yml up -d --wait
-TEST_DATABASE_URL=postgresql://starlight:starlight_test_password@127.0.0.1:54329/starlight_test npm test
-docker compose -f docker-compose.test.yml down --volumes
+TEST_DATABASE_URL=postgresql://starlight:starlight_test_password@127.0.0.1:54329/starlight_test ./gradlew test --no-daemon --offline
 ```
+
+## 주요 API
+
+- 공개: 다리, 질문, 강물 편지, 편지 상세, 설문 링크
+- 회원: 가입·로그인·계정 관리, 편지 작성, 반응, 보관, 신고, 문의
+- 운영자: TOTP 로그인, 질문·시작 편지·검사 규칙·신고·문의 관리, 설문 설정, 지표 및 알림
