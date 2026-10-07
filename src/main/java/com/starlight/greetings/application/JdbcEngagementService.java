@@ -68,7 +68,7 @@ public class JdbcEngagementService implements EngagementService {
             """, (rs, index) -> {
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("id", rs.getString("id")); item.put("bridgeId", rs.getString("bridge_id"));
-                item.put("savedAt", rs.getObject("created_at", Instant.class).toString());
+                item.put("savedAt", rs.getTimestamp("created_at").toInstant().toString());
                 if ("hidden".equals(rs.getString("status"))) {
                     item.put("unavailable", true); item.put("message", "지금은 볼 수 없는 편지");
                 } else {
