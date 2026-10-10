@@ -38,4 +38,24 @@ class ApiContractTest {
             .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, "http://127.0.0.1:5175"))
             .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_CREDENTIALS, "true"));
     }
+
+    @Test
+    void allowsCredentialedPreflightFromLocalhost5173() throws Exception {
+        mvc.perform(options("/api/v1/bridges")
+                .header(HttpHeaders.ORIGIN, "http://localhost:5173")
+                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "GET"))
+            .andExpect(status().isOk())
+            .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, "http://localhost:5173"))
+            .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_CREDENTIALS, "true"));
+    }
+
+    @Test
+    void rejectsPostFromUntrustedOrigin() throws Exception {
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/auth/signup")
+                .header(HttpHeaders.ORIGIN, "http://malicious-site.com")
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content("{}"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.error.code").value("ORIGIN_DENIED"));
+    }
 }

@@ -1,3 +1,51 @@
 package com.starlight.greetings.web;
-import java.io.IOException; import java.util.Arrays; import java.util.Set; import java.util.UUID; import java.util.stream.Collectors; import jakarta.servlet.FilterChain; import jakarta.servlet.ServletException; import jakarta.servlet.http.HttpServletRequest; import jakarta.servlet.http.HttpServletResponse; import org.springframework.beans.factory.annotation.Value; import org.springframework.http.MediaType; import org.springframework.stereotype.Component; import org.springframework.web.filter.OncePerRequestFilter;
-@Component public class ApiRequestContextFilter extends OncePerRequestFilter {private final Set<String> origins;public ApiRequestContextFilter(@Value("${app.allowed-origins:http://127.0.0.1:5175,http://127.0.0.1:5174}")String values){origins=Arrays.stream(values.split(",")).map(String::trim).collect(Collectors.toSet());}@Override protected void doFilterInternal(HttpServletRequest req,HttpServletResponse res,FilterChain chain)throws ServletException,IOException{res.setHeader("x-request-id",UUID.randomUUID().toString());if(req.getContentLengthLong()>16*1024){send(res,413,"PAYLOAD_TOO_LARGE","요청 본문이 너무 큽니다.");return;}String origin=req.getHeader("Origin");if(!"GET".equals(req.getMethod())&&!"HEAD".equals(req.getMethod())&&!"OPTIONS".equals(req.getMethod())&&origin!=null&&!origins.contains(origin)){send(res,403,"ORIGIN_DENIED","요청 출처를 확인해 주세요.");return;}chain.doFilter(req,res);}private void send(HttpServletResponse res,int status,String code,String message)throws IOException{res.setStatus(status);res.setCharacterEncoding(java.nio.charset.StandardCharsets.UTF_8.name());res.setContentType(MediaType.APPLICATION_JSON_VALUE);res.getWriter().write("{\"error\":{\"code\":\""+code+"\",\"message\":\""+message+"\"}}");}}
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.Set;
+import java.util.UUID;
+import java.util.stream.Collectors;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
+import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+@Component
+public class ApiRequestContextFilter extends OncePerRequestFilter {
+    private final Set<String> origins;
+
+    public ApiRequestContextFilter(
+        @Value("${app.allowed-origins:http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:5175,http://127.0.0.1:5175}") String values
+    ) {
+        this.origins = Arrays.stream(values.split(",")).map(String::trim).collect(Collectors.toSet());
+    }
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain)
+            throws ServletException, IOException {
+        res.setHeader("x-request-id", UUID.randomUUID().toString());
+        if (req.getContentLengthLong() > 16 * 1024) {
+            send(res, 413, "PAYLOAD_TOO_LARGE", "요청 본문이 너무 큽니다.");
+            return;
+        }
+        String origin = req.getHeader("Origin");
+        if (!"GET".equals(req.getMethod()) && !"HEAD".equals(req.getMethod()) && !"OPTIONS".equals(req.getMethod())
+                && origin != null && !origins.contains(origin)) {
+            send(res, 403, "ORIGIN_DENIED", "요청 출처를 확인해 주세요.");
+            return;
+        }
+        chain.doFilter(req, res);
+    }
+
+    private void send(HttpServletResponse res, int status, String code, String message) throws IOException {
+        res.setStatus(status);
+        res.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        res.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        res.getWriter().write("{\"error\":{\"code\":\"" + code + "\",\"message\":\"" + message + "\"}}");
+    }
+}

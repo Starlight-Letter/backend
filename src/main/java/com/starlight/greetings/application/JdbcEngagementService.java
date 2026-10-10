@@ -61,8 +61,9 @@ public class JdbcEngagementService implements EngagementService {
 
     @Override public List<Map<String, Object>> saved(String userId) {
         return jdbc.query("""
-            SELECT l.id::text, l.bridge_id, l.status, l.body, l.display_nickname, s.created_at
+            SELECT l.id::text, l.bridge_id, l.status, l.body, l.display_nickname, l.theme, q.body AS question_body, s.created_at
             FROM saves s JOIN letters l ON l.id = s.letter_id
+            LEFT JOIN questions q ON l.question_id = q.id
             WHERE s.user_id = ?::uuid AND l.status <> 'deleted'
             ORDER BY s.created_at DESC, l.id
             """, (rs, index) -> {
@@ -74,6 +75,8 @@ public class JdbcEngagementService implements EngagementService {
                 } else {
                     item.put("unavailable", false); item.put("preview", preview(rs.getString("body")));
                     item.put("displayNickname", rs.getString("display_nickname"));
+                    item.put("theme", rs.getInt("theme"));
+                    item.put("questionBody", rs.getString("question_body"));
                 }
                 return item;
             }, userId);

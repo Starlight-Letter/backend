@@ -4,9 +4,11 @@ import com.starlight.greetings.application.SignupService;
 import java.util.Map;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -15,6 +17,12 @@ public class AuthController {
     private final SignupService signupService;
     private final com.starlight.greetings.application.LoginService loginService; private final com.starlight.greetings.application.SessionService sessions;
     public AuthController(SignupService signupService, com.starlight.greetings.application.LoginService loginService, com.starlight.greetings.application.SessionService sessions) { this.signupService = signupService; this.loginService = loginService; this.sessions=sessions; }
+
+    @GetMapping("/check-nickname")
+    public ResponseEntity<ApiEnvelope<Map<String, Object>>> checkNickname(@RequestParam("nickname") String nickname) {
+        boolean available = signupService.isNicknameAvailable(nickname);
+        return ResponseEntity.ok(ApiEnvelope.of(Map.of("available", available)));
+    }
 
     @PostMapping("/signup")
     public ResponseEntity<ApiEnvelope<Map<String, Object>>> signup(@RequestBody Map<String, String> body) {

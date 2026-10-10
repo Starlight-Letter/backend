@@ -4,4 +4,5 @@ import com.starlight.greetings.web.SignupResult;
 
 public interface SignupService {
     SignupResult signup(String nickname, String password);
+    default boolean isNicknameAvailable(String nickname) { return true; }
 }

@@ -29,6 +29,15 @@ public class JdbcSignupService implements SignupService {
         } catch (DuplicateKeyException error) { throw new ApiException(HttpStatus.CONFLICT, "NICKNAME_TAKEN", "이미 사용 중인 닉네임입니다."); }
         return new SignupResult(id, nickname.display(), recovery, csrf, session);
     }
+    @Override public boolean isNicknameAvailable(String nicknameInput) {
+        try {
+            var nickname = validator.nickname(nicknameInput);
+            Integer count = jdbc.queryForObject("select count(*) from users where nickname_key = ? and status = 'active'", Integer.class, nickname.key());
+            return count != null && count == 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
     private String token() { byte[] bytes = new byte[32]; random.nextBytes(bytes); return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes); }
     private String digest(String value) { try { return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); } catch (Exception e) { throw new IllegalStateException(e); } }
 }
