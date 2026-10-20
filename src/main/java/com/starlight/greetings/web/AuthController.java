@@ -16,7 +16,8 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
     private final SignupService signupService;
     private final com.starlight.greetings.application.LoginService loginService; private final com.starlight.greetings.application.SessionService sessions;
-    public AuthController(SignupService signupService, com.starlight.greetings.application.LoginService loginService, com.starlight.greetings.application.SessionService sessions) { this.signupService = signupService; this.loginService = loginService; this.sessions=sessions; }
+    private final int trustedProxyHops;
+    public AuthController(SignupService signupService, com.starlight.greetings.application.LoginService loginService, com.starlight.greetings.application.SessionService sessions, @org.springframework.beans.factory.annotation.Value("${app.trusted-proxy-hops:0}") int trustedProxyHops) { this.signupService = signupService; this.loginService = loginService; this.sessions=sessions; this.trustedProxyHops = trustedProxyHops; }
 
     @GetMapping("/check-nickname")
     public ResponseEntity<ApiEnvelope<Map<String, Object>>> checkNickname(@RequestParam("nickname") String nickname) {
@@ -25,8 +26,8 @@ public class AuthController {
     }
 
     @PostMapping("/signup")
-    public ResponseEntity<ApiEnvelope<Map<String, Object>>> signup(@RequestBody Map<String, String> body) {
-        SignupResult result = signupService.signup(body.get("nickname"), body.get("password"));
+    public ResponseEntity<ApiEnvelope<Map<String, Object>>> signup(@RequestBody Map<String, String> body, jakarta.servlet.http.HttpServletRequest request) {
+        SignupResult result = signupService.signup(body.get("nickname"), body.get("password"), ClientIp.of(request, trustedProxyHops));
         return ResponseEntity.status(201)
             .header(HttpHeaders.SET_COOKIE, "star_session_dev=" + result.sessionToken() + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000")
             .body(ApiEnvelope.of(Map.of("user", Map.of("id", result.id(), "nickname", result.nickname(), "role", "member"), "recoveryCode", result.recoveryCode(), "csrfToken", result.csrfToken())));

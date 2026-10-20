@@ -3,6 +3,7 @@ package com.starlight.greetings.application;
 import com.starlight.greetings.web.SignupResult;
 
 public interface SignupService {
-    SignupResult signup(String nickname, String password);
+    /** clientIp: 같은 곳에서 계정을 마구 만드는 것을 막는 데 쓴다(null이면 IP 제한을 건너뜀). */
+    SignupResult signup(String nickname, String password, String clientIp);
     default boolean isNicknameAvailable(String nickname) { return true; }
 }

@@ -25,7 +25,7 @@ class AuthControllerTest {
     @MockBean private SessionService sessionService;
 
     @Test void signsUpAndIssuesTheDevelopmentSessionCookie() throws Exception {
-        given(signupService.signup(any(), any())).willReturn(new SignupResult("user-1", "별빛이", "recovery", "csrf", "session"));
+        given(signupService.signup(any(), any(), any())).willReturn(new SignupResult("user-1", "별빛이", "recovery", "csrf", "session"));
         mvc.perform(post("/api/v1/auth/signup").contentType(MediaType.APPLICATION_JSON).content("{\"nickname\":\"별빛이\",\"password\":\"password1\"}"))
             .andExpect(status().isCreated())
             .andExpect(cookie().value("star_session_dev", "session"))

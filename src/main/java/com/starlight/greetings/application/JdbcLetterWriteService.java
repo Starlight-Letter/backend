@@ -12,6 +12,25 @@ import com.starlight.greetings.web.ApiException; import com.starlight.greetings.
     if(keys.get(0)[1]!=null)return new LetterWriteResult(keys.get(0)[1],true);
     var questions=jdbc.query("select id::text from questions where bridge_id=? and status='published' and effective_at<=now() order by effective_at desc,id desc limit 1",(r,i)->r.getString(1),bridge);
     if(questions.isEmpty()||!questions.get(0).equals(question))throw new ApiException(HttpStatus.CONFLICT,"QUESTION_CHANGED","질문이 바뀌었어요. 새 질문을 확인해 주세요.");
+    // 강물 도배 방지: 한 계정이 24시간 동안 한 다리에 3통, 전체 10통까지 (같은 요청 키 재전송은 위에서 이미 돌려보냄)
+    var recent=jdbc.queryForObject("select count(*) filter (where bridge_id=?)::int, count(*)::int from letters where author_user_id=?::uuid and created_at>now()-interval '24 hours'",(r,i)->new int[]{r.getInt(1),r.getInt(2)},bridge,user);
+    if(recent[0]>=BRIDGE_DAILY_LIMIT)throw new ApiException(HttpStatus.TOO_MANY_REQUESTS,"LETTER_LIMIT","오늘은 이 다리에 안부를 충분히 띄웠어요. 내일 다시 띄워 주세요.");
+    if(recent[1]>=TOTAL_DAILY_LIMIT)throw new ApiException(HttpStatus.TOO_MANY_REQUESTS,"LETTER_LIMIT","오늘은 안부를 충분히 띄웠어요. 내일 다시 띄워 주세요.");
     String id=UUID.randomUUID().toString();jdbc.update("insert into letters (id,bridge_id,question_id,author_user_id,display_nickname,body,theme,is_seed,status) values (?::uuid,?,?::uuid,?::uuid,?,?,?,false,'published')",id,bridge,question,user,displayNickname,body.trim(),theme);jdbc.update("update request_keys set letter_id=?::uuid where user_id=?::uuid and key=?",id,user,key);return new LetterWriteResult(id,false);}
  private ApiException bad(String c,String m){return new ApiException(HttpStatus.BAD_REQUEST,c,m);}private String digest(String v){try{return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(v.getBytes(StandardCharsets.UTF_8)));}catch(Exception e){throw new IllegalStateException(e);}}
+ static final int BRIDGE_DAILY_LIMIT=3, TOTAL_DAILY_LIMIT=10;
+ // 남은 횟수와, 다 썼을 때 다음 편지를 쓸 수 있는 시각(가장 오래된 편지가 24시간 창을 벗어나는 순간)
+ @Override public Map<String,Object> quota(String user,String bridge){
+  return jdbc.queryForObject("select count(*) filter (where bridge_id=?)::int, count(*)::int, min(created_at) filter (where bridge_id=?), min(created_at) from letters where author_user_id=?::uuid and created_at>now()-interval '24 hours'",(r,i)->{
+   int bridgeUsed=r.getInt(1), totalUsed=r.getInt(2);
+   int bridgeLeft=Math.max(0,BRIDGE_DAILY_LIMIT-bridgeUsed), totalLeft=Math.max(0,TOTAL_DAILY_LIMIT-totalUsed);
+   java.time.Instant next=null;
+   if(bridgeLeft==0&&r.getTimestamp(3)!=null)next=r.getTimestamp(3).toInstant().plus(java.time.Duration.ofHours(24));
+   if(totalLeft==0&&r.getTimestamp(4)!=null){var t=r.getTimestamp(4).toInstant().plus(java.time.Duration.ofHours(24));if(next==null||t.isAfter(next))next=t;}
+   Map<String,Object> q=new LinkedHashMap<>();
+   q.put("bridgeLimit",BRIDGE_DAILY_LIMIT);q.put("bridgeRemaining",bridgeLeft);q.put("totalLimit",TOTAL_DAILY_LIMIT);q.put("totalRemaining",totalLeft);
+   q.put("remaining",Math.min(bridgeLeft,totalLeft));q.put("nextAvailableAt",next==null?null:next.toString());
+   return q;
+  },bridge,bridge,user);
+ }
 }

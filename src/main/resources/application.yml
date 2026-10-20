@@ -14,4 +14,7 @@ spring:
     locations: classpath:db/migration
 
 app:
+  # 앞단 프록시(로드밸런서·CDN) 수. 운영에서 프록시 뒤라면 1 이상으로 설정해야 가입 IP 제한이 실제 접속자 IP로 동작한다.
+  # 0이면 X-Forwarded-For를 믿지 않고 직접 연결 주소를 쓴다(로컬 개발 기본값).
+  trusted-proxy-hops: ${APP_TRUSTED_PROXY_HOPS:0}
   allowed-origins: ${APP_ALLOWED_ORIGINS:${APP_ORIGIN:http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:5175,http://127.0.0.1:5175}}

@@ -20,8 +20,10 @@ public class JdbcSignupService implements SignupService {
     private final JdbcTemplate jdbc; private final SignupValidator validator = new SignupValidator();
     private final PasswordHasher passwords = new PasswordHasher(); private final SecureRandom random = new SecureRandom(); private final RequestRateLimiter limiter;
     public JdbcSignupService(JdbcTemplate jdbc, RequestRateLimiter limiter) { this.jdbc = jdbc; this.limiter=limiter; }
-    @Override @Transactional public SignupResult signup(String nicknameInput, String passwordInput) {
+    @Override @Transactional public SignupResult signup(String nicknameInput, String passwordInput, String clientIp) {
         var nickname = validator.nickname(nicknameInput); String password = validator.password(passwordInput); limiter.consume("signup-account",nickname.key(),5);
+        // 닉네임만 바꿔 가며 계정을 계속 만드는 것을 막는다: 같은 IP에서 1시간에 5개까지
+        if (clientIp != null && !clientIp.isBlank()) limiter.consume("signup-ip",clientIp,5,60);
         String id = UUID.randomUUID().toString(), recovery = token(), session = token(), csrf = token();
         try {
             jdbc.update("insert into users (id,nickname,nickname_key,password_hash,recovery_code_hash,role,status) values (?::uuid,?,?,?,?, 'member','active')", id, nickname.display(), nickname.key(), passwords.hash(password), passwords.hash(recovery));
@@ -32,7 +34,7 @@ public class JdbcSignupService implements SignupService {
     @Override public boolean isNicknameAvailable(String nicknameInput) {
         try {
             var nickname = validator.nickname(nicknameInput);
-            Integer count = jdbc.queryForObject("select count(*) from users where nickname_key = ? and status = 'active'", Integer.class, nickname.key());
+            Integer count = jdbc.queryForObject("select count(*) from users where nickname_key = ? and status in ('active', 'suspended')", Integer.class, nickname.key());
             return count != null && count == 0;
         } catch (Exception e) {
             return false;

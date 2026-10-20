@@ -87,18 +87,24 @@ public class JdbcEngagementService implements EngagementService {
         if ("bridge".equals(scope) && (bridgeId == null || bridgeId.isBlank())) throw invalid("BRIDGE_REQUIRED", "다리를 선택해 주세요.");
         Instant now = Instant.now(); Instant start = periodStart(period, now);
         return jdbc.query("""
-            SELECT l.id::text, l.bridge_id, l.body, l.display_nickname, l.theme,
+            SELECT l.id::text, l.bridge_id, l.body, l.display_nickname, l.theme, q.body AS question_body,
                    count(r.id)::int AS reaction_count
             FROM reactions r JOIN letters l ON l.id = r.letter_id
+            LEFT JOIN questions q ON l.question_id = q.id
             WHERE r.active = true AND r.activated_at >= ? AND r.activated_at <= ?
               AND l.status = 'published' AND (?::text IS NULL OR l.bridge_id = ?)
-            GROUP BY l.id
+            GROUP BY l.id, q.body
             ORDER BY reaction_count DESC, max(r.activated_at) DESC, l.id ASC
             LIMIT 10
-            """, (rs, index) -> Map.<String, Object>of(
-                "rank", index + 1, "id", rs.getString("id"), "bridgeId", rs.getString("bridge_id"),
-                "preview", preview(rs.getString("body")), "displayNickname", rs.getString("display_nickname"),
-                "theme", rs.getInt("theme"), "reactionCount", rs.getInt("reaction_count")),
+            """, (rs, index) -> {
+                // 시작 편지는 질문이 없어 questionBody가 null이므로 null을 허용하는 맵을 쓴다.
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("rank", index + 1); item.put("id", rs.getString("id")); item.put("bridgeId", rs.getString("bridge_id"));
+                item.put("preview", preview(rs.getString("body"))); item.put("displayNickname", rs.getString("display_nickname"));
+                item.put("theme", rs.getInt("theme")); item.put("reactionCount", rs.getInt("reaction_count"));
+                item.put("questionBody", rs.getString("question_body"));
+                return item;
+            },
             java.sql.Timestamp.from(start), java.sql.Timestamp.from(now), "bridge".equals(scope) ? bridgeId : null, "bridge".equals(scope) ? bridgeId : null);
     }
 
