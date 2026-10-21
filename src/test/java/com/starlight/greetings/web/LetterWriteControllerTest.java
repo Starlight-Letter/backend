@@ -16,8 +16,16 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(LetterWriteController.class)
+@org.springframework.context.annotation.Import(ApiExceptionHandler.class)
 class LetterWriteControllerTest {
- @Autowired MockMvc mvc; @MockBean LetterWriteService letters; @MockBean SessionService sessions;
+ @Autowired MockMvc mvc; @MockBean LetterWriteService letters; @MockBean SessionService sessions; @MockBean com.starlight.greetings.application.BridgePassService passes;
+ @Test void refusesALetterWithoutTheBridgeQrPass() throws Exception {
+  given(sessions.member(any(),any())).willReturn(new SessionView("u","별빛이","member","csrf"));
+  org.mockito.BDDMockito.willThrow(new ApiException(org.springframework.http.HttpStatus.FORBIDDEN,"BRIDGE_LOCKED","이 다리의 편지는 다리 현장의 QR로 들어와야 쓸 수 있어요.")).given(passes).requireWrite(null,"bongnim");
+  mvc.perform(post("/api/v1/bridges/bongnim/letters").cookie(new jakarta.servlet.http.Cookie("star_session_dev","session")).header("x-csrf-token","csrf").header("idempotency-key","12345678").contentType(MediaType.APPLICATION_JSON).content("{\"questionId\":\"00000000-0000-4000-8000-000000000101\",\"body\":\"오늘도 잘 버텼어요.\",\"theme\":2}"))
+   .andExpect(status().isForbidden()).andExpect(jsonPath("$.error.code").value("BRIDGE_LOCKED"));
+  org.mockito.Mockito.verify(letters,org.mockito.Mockito.never()).write(any());
+ }
  @Test void writesALetterForTheCurrentBridgeQuestion() throws Exception {
   given(letters.write(any())).willReturn(new com.starlight.greetings.application.LetterWriteResult("letter-1", false)); given(sessions.member(any(),any())).willReturn(new SessionView("u","별빛이","member","csrf"));
   mvc.perform(post("/api/v1/bridges/bongnim/letters").cookie(new jakarta.servlet.http.Cookie("star_session_dev","session")).header("x-csrf-token","csrf").header("idempotency-key","12345678").contentType(MediaType.APPLICATION_JSON).content("{\"questionId\":\"00000000-0000-4000-8000-000000000101\",\"body\":\"오늘도 잘 버텼어요.\",\"theme\":2}"))
