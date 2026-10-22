@@ -28,6 +28,9 @@ public class EngagementController {
     @GetMapping("/me/saved") public ApiEnvelope<List<Map<String, Object>>> saved(HttpServletRequest request) {
         return ApiEnvelope.of(engagement.saved(sessions.current(token(request)).id()));
     }
+    @GetMapping("/me/letter-trace") public ApiEnvelope<Map<String, Object>> letterTrace(HttpServletRequest request) {
+        return ApiEnvelope.of(engagement.letterTrace(sessions.current(token(request)).id()));
+    }
     @GetMapping("/letters/{letterId}/engagement") public ApiEnvelope<Map<String, Object>> state(@PathVariable String letterId, HttpServletRequest request) {
         return ApiEnvelope.of(engagement.state(letterId, sessions.current(token(request)).id()));
     }

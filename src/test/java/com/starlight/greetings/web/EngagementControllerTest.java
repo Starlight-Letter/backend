@@ -40,6 +40,14 @@ class EngagementControllerTest {
     .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].id").value("letter-1"));
  }
 
+ @Test void readsOnlyTotalsOfMyLetters() throws Exception {
+  given(sessions.current("session")).willReturn(new SessionView("user-1", "별빛이", "member", "csrf"));
+  given(engagement.letterTrace("user-1")).willReturn(Map.of("lettersSent", 7, "comfortReceived", 23, "keptByOthers", 4));
+  mvc.perform(get("/api/v1/me/letter-trace").cookie(cookie))
+    .andExpect(status().isOk()).andExpect(jsonPath("$.data.lettersSent").value(7))
+    .andExpect(jsonPath("$.data.comfortReceived").value(23)).andExpect(jsonPath("$.data.keptByOthers").value(4));
+ }
+
  @Test void servesWeeklyBestAcrossAllBridges() throws Exception {
   given(engagement.best("all", null, "week")).willReturn(List.of(Map.of("rank", 1, "id", "letter-1", "reactionCount", 5)));
   mvc.perform(get("/api/v1/best").queryParam("scope", "all").queryParam("period", "week"))

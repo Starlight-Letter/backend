@@ -8,5 +8,6 @@ public interface EngagementService {
     Map<String, Object> react(String letterId, String userId, boolean active);
     Map<String, Object> save(String letterId, String userId, boolean saved);
     List<Map<String, Object>> saved(String userId);
+    Map<String, Object> letterTrace(String userId);
     List<Map<String, Object>> best(String scope, String bridgeId, String period);
 }

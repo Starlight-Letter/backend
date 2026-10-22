@@ -18,7 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
  private final JdbcTemplate jdbc; public JdbcBridgePassService(JdbcTemplate jdbc){this.jdbc=jdbc;}
  @Transactional public Map<String,Object> issue(String bridgeId,String qrKey,String previousToken){
   Boolean valid=qrKey!=null&&Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from bridges where id=? and active=true and qr_key=?)",Boolean.class,bridgeId,qrKey));
-  if(!valid)throw new ApiException(HttpStatus.FORBIDDEN,"QR_INVALID","이 QR로는 편지 쓰기를 열 수 없어요. 다리 현장의 새 QR을 찍어 주세요.");
+  if(!valid)throw new ApiException(HttpStatus.FORBIDDEN,"QR_INVALID","확인할 수 없는 QR이에요. 다리 근처 포스터의 QR로 다시 들어와 주세요.");
   // 마지막으로 찍은 다리 하나만 남긴다
   if(previousToken!=null)jdbc.update("delete from bridge_passes where token_hash=?",digest(previousToken));
   jdbc.update("delete from bridge_passes where expires_at<=now()");
@@ -34,7 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
  }
  public void requireWrite(String token,String bridgeId){
   var pass=current(token);
-  if(pass==null||!bridgeId.equals(pass.get("bridgeId")))throw new ApiException(HttpStatus.FORBIDDEN,"BRIDGE_LOCKED","이 다리의 편지는 다리 현장의 QR로 들어와야 쓸 수 있어요.");
+  if(pass==null||!bridgeId.equals(pass.get("bridgeId")))throw new ApiException(HttpStatus.FORBIDDEN,"BRIDGE_LOCKED","이 다리의 편지는 다리 근처 포스터의 QR로 들어와야 띄울 수 있어요.");
  }
  public List<Map<String,Object>> qrKeys(){
   return jdbc.query("select id,name,qr_key from bridges where active=true order by display_order",(r,i)->{Map<String,Object> item=new LinkedHashMap<>();item.put("bridgeId",r.getString(1));item.put("bridgeName",r.getString(2));item.put("qrKey",r.getString(3));return item;});

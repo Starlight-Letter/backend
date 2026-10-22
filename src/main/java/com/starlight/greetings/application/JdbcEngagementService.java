@@ -82,6 +82,23 @@ public class JdbcEngagementService implements EngagementService {
             }, userId);
     }
 
+    // 내가 쓴 편지는 목록으로 돌려주지 않고, 띄운 수와 받은 위로·보관 수의 합계만 알려준다.
+    @Override public Map<String, Object> letterTrace(String userId) {
+        Map<String, Object> row = jdbc.queryForMap("""
+            SELECT (SELECT count(*)::int FROM letters WHERE author_user_id = ?::uuid AND status <> 'deleted') AS letters_sent,
+                   (SELECT count(*)::int FROM reactions r JOIN letters l ON l.id = r.letter_id
+                     WHERE l.author_user_id = ?::uuid AND l.status <> 'deleted' AND r.active = true
+                       AND r.user_id IS DISTINCT FROM ?::uuid) AS comfort_received,
+                   (SELECT count(*)::int FROM saves s JOIN letters l ON l.id = s.letter_id
+                     WHERE l.author_user_id = ?::uuid AND l.status = 'published' AND s.user_id <> ?::uuid) AS kept_by_others
+            """, userId, userId, userId, userId, userId);
+        Map<String, Object> trace = new LinkedHashMap<>();
+        trace.put("lettersSent", row.get("letters_sent"));
+        trace.put("comfortReceived", row.get("comfort_received"));
+        trace.put("keptByOthers", row.get("kept_by_others"));
+        return trace;
+    }
+
     @Override public List<Map<String, Object>> best(String scope, String bridgeId, String period) {
         if (!"all".equals(scope) && !"bridge".equals(scope)) throw invalid("INVALID_SCOPE", "범위를 다시 선택해 주세요.");
         if ("bridge".equals(scope) && (bridgeId == null || bridgeId.isBlank())) throw invalid("BRIDGE_REQUIRED", "다리를 선택해 주세요.");
