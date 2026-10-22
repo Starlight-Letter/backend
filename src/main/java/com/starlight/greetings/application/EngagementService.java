@@ -9,5 +9,7 @@ public interface EngagementService {
     Map<String, Object> save(String letterId, String userId, boolean saved);
     List<Map<String, Object>> saved(String userId);
     Map<String, Object> letterTrace(String userId);
+    List<Map<String, Object>> myLetters(String userId);
+    Map<String, Object> deleteMyLetter(String letterId, String userId);
     List<Map<String, Object>> best(String scope, String bridgeId, String period);
 }

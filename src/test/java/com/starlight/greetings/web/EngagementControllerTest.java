@@ -48,6 +48,22 @@ class EngagementControllerTest {
     .andExpect(jsonPath("$.data.comfortReceived").value(23)).andExpect(jsonPath("$.data.keptByOthers").value(4));
  }
 
+ @Test void readsMyLetters() throws Exception {
+  given(sessions.current("session")).willReturn(new SessionView("user-1", "별빛이", "member", "csrf"));
+  given(engagement.myLetters("user-1")).willReturn(List.of(Map.of("id", "letter-1", "status", "published", "reactionCount", 2)));
+  mvc.perform(get("/api/v1/me/letters").cookie(cookie))
+    .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].id").value("letter-1")).andExpect(jsonPath("$.data[0].reactionCount").value(2));
+ }
+
+ @Test void deletesMyLetterOnlyWithCsrfToken() throws Exception {
+  given(sessions.member("session", "csrf")).willReturn(new SessionView("user-1", "별빛이", "member", "csrf"));
+  given(engagement.deleteMyLetter("letter-1", "user-1")).willReturn(Map.of("deleted", true));
+  mvc.perform(delete("/api/v1/me/letters/letter-1").cookie(cookie).header("x-csrf-token", "csrf"))
+    .andExpect(status().isOk()).andExpect(jsonPath("$.data.deleted").value(true));
+  given(sessions.member("session", null)).willThrow(new ApiException(org.springframework.http.HttpStatus.FORBIDDEN, "CSRF_REQUIRED", "요청 인증 정보가 올바르지 않습니다."));
+  mvc.perform(delete("/api/v1/me/letters/letter-1").cookie(cookie)).andExpect(status().isForbidden());
+ }
+
  @Test void servesWeeklyBestAcrossAllBridges() throws Exception {
   given(engagement.best("all", null, "week")).willReturn(List.of(Map.of("rank", 1, "id", "letter-1", "reactionCount", 5)));
   mvc.perform(get("/api/v1/best").queryParam("scope", "all").queryParam("period", "week"))

@@ -16,6 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class JdbcEngagementService implements EngagementService {
@@ -90,7 +91,7 @@ public class JdbcEngagementService implements EngagementService {
             }, userId);
     }
 
-    // 내가 쓴 편지는 목록으로 돌려주지 않고, 띄운 수와 받은 위로·보관 수의 합계만 알려준다.
+    // 계정 화면의 합계. 편지별 내역은 myLetters에서 본다.
     @Override public Map<String, Object> letterTrace(String userId) {
         Map<String, Object> row = jdbc.queryForMap("""
             SELECT (SELECT count(*)::int FROM letters WHERE author_user_id = ?::uuid AND status <> 'deleted') AS letters_sent,
@@ -105,6 +106,45 @@ public class JdbcEngagementService implements EngagementService {
         trace.put("comfortReceived", row.get("comfort_received"));
         trace.put("keptByOthers", row.get("kept_by_others"));
         return trace;
+    }
+
+    // 내가 띄운 편지: 숨김(신고 검토 중)인 편지도 본인에게는 본문을 보여주고 상태만 알려준다.
+    // 받은 위로·간직 수는 합계(letterTrace)와 같은 기준으로, 내가 내 편지에 남긴 것은 빼고 센다.
+    @Override public List<Map<String, Object>> myLetters(String userId) {
+        return jdbc.query("""
+            SELECT l.id::text, l.bridge_id, l.status, l.body, l.display_nickname, l.theme, q.body AS question_body, l.created_at,
+                   (SELECT count(*)::int FROM reactions r WHERE r.letter_id = l.id AND r.active = true AND r.user_id IS DISTINCT FROM l.author_user_id) AS reaction_count,
+                   (SELECT count(*)::int FROM saves s WHERE s.letter_id = l.id AND s.user_id <> l.author_user_id) AS kept_count
+            FROM letters l LEFT JOIN questions q ON l.question_id = q.id
+            WHERE l.author_user_id = ?::uuid AND l.status <> 'deleted'
+            ORDER BY l.created_at DESC, l.id
+            """, (rs, index) -> {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("id", rs.getString("id")); item.put("bridgeId", rs.getString("bridge_id"));
+                item.put("status", rs.getString("status")); item.put("preview", preview(rs.getString("body")));
+                item.put("displayNickname", rs.getString("display_nickname")); item.put("theme", rs.getInt("theme"));
+                item.put("questionBody", rs.getString("question_body"));
+                item.put("createdAt", rs.getTimestamp("created_at").toInstant().toString());
+                item.put("reactionCount", rs.getInt("reaction_count")); item.put("keptCount", rs.getInt("kept_count"));
+                return item;
+            }, userId);
+    }
+
+    // 작성자가 직접 지우기: 운영자 최종 삭제와 같은 방식으로 본문·반응·보관을 지우고 작성자 연결을 끊는다.
+    // 작성자 연결이 끊기면 하루 작성 수에서도 빠지므로, 잘못 쓴 편지를 지우고 다시 쓸 수 있다.
+    // 신고로 숨겨진(검토 중) 편지는 지울 수 없다: 지우고 다시 쓰는 식으로 신고 검토를 피하지 못하게 한다.
+    @Override @Transactional public Map<String, Object> deleteMyLetter(String letterId, String userId) {
+        validUuid(letterId);
+        List<String> status = jdbc.query("SELECT status FROM letters WHERE id = ?::uuid AND author_user_id = ?::uuid AND status <> 'deleted' FOR UPDATE",
+            (rs, index) -> rs.getString(1), letterId, userId);
+        if (status.isEmpty()) throw new ApiException(HttpStatus.NOT_FOUND, "LETTER_NOT_FOUND", "편지를 찾을 수 없습니다.");
+        if ("hidden".equals(status.get(0))) throw new ApiException(HttpStatus.CONFLICT, "LETTER_UNDER_REVIEW", "신고 검토 중인 편지는 지금 지울 수 없어요.");
+        int reactions = jdbc.update("DELETE FROM reactions WHERE letter_id = ?::uuid", letterId);
+        int saves = jdbc.update("DELETE FROM saves WHERE letter_id = ?::uuid", letterId);
+        jdbc.update("UPDATE letters SET status = 'deleted', body = NULL, display_nickname = NULL, author_user_id = NULL, deleted_at = now() WHERE id = ?::uuid", letterId);
+        jdbc.update("INSERT INTO deletion_events (id, letter_id, actor_user_id, reason, reaction_count, save_count) VALUES (?::uuid, ?::uuid, ?::uuid, '작성자 삭제', ?, ?)",
+            UUID.randomUUID().toString(), letterId, userId, reactions, saves);
+        return Map.of("deleted", true);
     }
 
     @Override public List<Map<String, Object>> best(String scope, String bridgeId, String period) {

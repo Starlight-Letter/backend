@@ -31,6 +31,12 @@ public class EngagementController {
     @GetMapping("/me/letter-trace") public ApiEnvelope<Map<String, Object>> letterTrace(HttpServletRequest request) {
         return ApiEnvelope.of(engagement.letterTrace(sessions.current(token(request)).id()));
     }
+    @GetMapping("/me/letters") public ApiEnvelope<List<Map<String, Object>>> myLetters(HttpServletRequest request) {
+        return ApiEnvelope.of(engagement.myLetters(sessions.current(token(request)).id()));
+    }
+    @DeleteMapping("/me/letters/{letterId}") public ApiEnvelope<Map<String, Object>> deleteMyLetter(@PathVariable String letterId, @RequestHeader(value = "x-csrf-token", required = false) String csrf, HttpServletRequest request) {
+        return ApiEnvelope.of(engagement.deleteMyLetter(letterId, sessions.member(token(request), csrf).id()));
+    }
     @GetMapping("/letters/{letterId}/engagement") public ApiEnvelope<Map<String, Object>> state(@PathVariable String letterId, HttpServletRequest request) {
         return ApiEnvelope.of(engagement.state(letterId, sessions.current(token(request)).id()));
     }
