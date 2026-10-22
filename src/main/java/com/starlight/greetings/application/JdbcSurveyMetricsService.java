@@ -7,20 +7,26 @@ import com.starlight.greetings.web.ApiException; import java.sql.Timestamp; impo
  public Map<String,Object> event(Map<String,Object> input,String source){return record(input,"",null);} @Override public Map<String,Object> event(Map<String,Object> input,String source,String viewerKind){return record(input,"",viewerKind);} public Map<String,Object> surveyOpen(Map<String,Object> input,String source){if(!(Boolean)survey().get("active"))throw new ApiException(HttpStatus.CONFLICT,"SURVEY_CLOSED","설문 기간이 아닙니다.");return record(input,"survey_open",null);}
  private Map<String,Object> record(Map<String,Object> input,String forced,String viewerKind){String id=input.get("eventId") instanceof String v?v:null;String type=forced.isEmpty()?(input.get("eventType") instanceof String v?v:null):forced;String bridge=input.get("bridgeId") instanceof String v?v:null;String letter=input.get("letterId") instanceof String v?v:null;if(id==null||!id.matches("^[0-9a-fA-F-]{36}$"))throw bad("INVALID_EVENT_ID","이벤트 식별값을 확인해 주세요.");if(!Set.of("survey_open","qr_entry","letter_open","five_reached","signup_start","write_start","home_visit","bridge_visit").contains(type))throw bad("INVALID_EVENT_TYPE","이벤트 종류를 확인해 주세요.");String kind=null;if("letter_open".equals(type)){var letters=jdbc.query("select bridge_id,is_seed from letters where id=?::uuid and status='published'",(r,i)->new Object[]{r.getString(1),r.getBoolean(2)},letter);if(letters.isEmpty())throw new ApiException(HttpStatus.NOT_FOUND,"LETTER_NOT_FOUND","편지를 찾을 수 없습니다.");bridge=(String)letters.get(0)[0];kind=(Boolean)letters.get(0)[1]?"seed":"member";}else if(!"survey_open".equals(type)&&!"home_visit".equals(type)&&bridge==null)throw bad("BRIDGE_REQUIRED","다리를 선택해 주세요.");try{String viewer="guest".equals(viewerKind)||"member".equals(viewerKind)?viewerKind:null;int n=jdbc.update("insert into metric_events(id,event_type,bridge_id,letter_kind,viewer_kind) values(?::uuid,?,?,?,?) on conflict(id) do nothing",id,type,bridge,kind,viewer);return Map.of("counted",n==1);}catch(org.springframework.dao.DataIntegrityViolationException e){throw new ApiException(HttpStatus.NOT_FOUND,"BRIDGE_NOT_FOUND","다리 정보를 확인해 주세요.");}}
  public Map<String,Object> summary(String from,String to){Timestamp a=parse(from),b=parse(to);Map<String,Object> out=new LinkedHashMap<>();
- out.put("homeVisits",viewerTotals("home_visit",a,b));
- out.put("bridgeVisits",byBridgeViewer("bridge_visit",a,b));
- out.put("qrEntries",byBridge("qr_entry",a,b));
- out.put("letterOpens",byBridgeViewer("letter_open",a,b));
- out.put("fiveReached",byBridge("five_reached",a,b));
- out.put("signupCompleted",jdbc.queryForObject("select count(*)::int from users where role='member'"+PERIOD,Integer.class,a,a,b,b));
+ // 이벤트 종류마다 따로 세면 방문 기록 테이블을 6번 읽는다(가장 빨리 쌓이는 테이블이라 한 달 x3 데이터에서 지표 화면이 1초를 넘었다).
+ // 한 번만 읽어 종류·다리별로 묶고, 화면에 필요한 형태로는 자바에서 나눈다. 기간이 없으면 조건을 빼서 계획이 단순해지게 한다.
+ String range=(a==null?"":" and created_at>=?")+(b==null?"":" and created_at<?");Object[] args=java.util.stream.Stream.of(a,b).filter(Objects::nonNull).toArray();
+ List<EventCount> events=jdbc.query("select event_type,bridge_id,count(*)::int,count(*) filter (where viewer_kind='guest')::int,count(*) filter (where viewer_kind='member')::int from metric_events where true"+range+" group by event_type,bridge_id",(r,i)->new EventCount(r.getString(1),r.getString(2),r.getInt(3),r.getInt(4),r.getInt(5)),args);
+ out.put("homeVisits",viewerTotals(events,"home_visit"));
+ out.put("bridgeVisits",byBridgeViewer(events,"bridge_visit"));
+ out.put("qrEntries",byBridge(events,"qr_entry"));
+ out.put("letterOpens",byBridgeViewer(events,"letter_open"));
+ out.put("fiveReached",byBridge(events,"five_reached"));
+ out.put("signupCompleted",jdbc.queryForObject("select count(*)::int from users where role='member'"+range,Integer.class,args));
  out.put("memberLettersByBridge",jdbc.query("select bridge_id,count(*)::int count from letters where is_seed=false and status<>'deleted' group by bridge_id order by bridge_id",(r,i)->bridgeCount(r.getString(1),r.getInt(2))));
- out.put("surveyOpens",byBridge("survey_open",a,b));
+ out.put("surveyOpens",byBridge(events,"survey_open"));
  return out;}
- private static final String PERIOD=" and (?::timestamptz is null or created_at>=?::timestamptz) and (?::timestamptz is null or created_at<?::timestamptz)";
+ private record EventCount(String type,String bridgeId,int total,int guest,int member){}
+ // DB의 order by bridge_id와 같은 순서(다리 없는 기록은 마지막)
+ private static List<EventCount> ofType(List<EventCount> events,String type){return events.stream().filter(e->e.type().equals(type)).sorted(Comparator.comparing(EventCount::bridgeId,Comparator.nullsLast(Comparator.naturalOrder()))).toList();}
  // 조회수: 전체와 비회원·회원 수(이 기능 이전 기록은 구분 없이 전체에만 들어간다)
- private Map<String,Object> viewerTotals(String type,Timestamp a,Timestamp b){return jdbc.queryForObject("select count(*)::int,count(*) filter (where viewer_kind='guest')::int,count(*) filter (where viewer_kind='member')::int from metric_events where event_type=?"+PERIOD,(r,i)->viewerRow(null,r.getInt(1),r.getInt(2),r.getInt(3)),type,a,a,b,b);}
- private List<Map<String,Object>> byBridgeViewer(String type,Timestamp a,Timestamp b){return jdbc.query("select bridge_id,count(*)::int,count(*) filter (where viewer_kind='guest')::int,count(*) filter (where viewer_kind='member')::int from metric_events where event_type=?"+PERIOD+" group by bridge_id order by bridge_id",(r,i)->viewerRow(r.getString(1),r.getInt(2),r.getInt(3),r.getInt(4)),type,a,a,b,b);}
- private List<Map<String,Object>> byBridge(String type,Timestamp a,Timestamp b){return jdbc.query("select bridge_id,count(*)::int from metric_events where event_type=?"+PERIOD+" group by bridge_id order by bridge_id",(r,i)->bridgeCount(r.getString(1),r.getInt(2)),type,a,a,b,b);}
+ private static Map<String,Object> viewerTotals(List<EventCount> events,String type){var rows=ofType(events,type);return viewerRow(null,rows.stream().mapToInt(EventCount::total).sum(),rows.stream().mapToInt(EventCount::guest).sum(),rows.stream().mapToInt(EventCount::member).sum());}
+ private static List<Map<String,Object>> byBridgeViewer(List<EventCount> events,String type){return ofType(events,type).stream().map(e->viewerRow(e.bridgeId(),e.total(),e.guest(),e.member())).toList();}
+ private static List<Map<String,Object>> byBridge(List<EventCount> events,String type){return ofType(events,type).stream().map(e->bridgeCount(e.bridgeId(),e.total())).toList();}
  private static Map<String,Object> viewerRow(String bridgeId,int total,int guest,int member){var row=new LinkedHashMap<String,Object>();if(bridgeId!=null)row.put("bridgeId",bridgeId);row.put("total",total);row.put("guest",guest);row.put("member",member);return row;}
  // 홈 화면 설문처럼 다리 없이 기록된 이벤트는 bridgeId가 null이라 Map.of 대신 null을 허용하는 맵을 쓴다.
  private static Map<String,Object> bridgeCount(String bridgeId,int count){var row=new java.util.LinkedHashMap<String,Object>();row.put("bridgeId",bridgeId);row.put("count",count);return row;}

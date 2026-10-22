@@ -2,14 +2,17 @@ package com.starlight.greetings.application;
 
 import com.starlight.greetings.web.ApiException;
 import java.time.DayOfWeek;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -17,7 +20,12 @@ import org.springframework.stereotype.Service;
 @Service
 public class JdbcEngagementService implements EngagementService {
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    private static final int BEST_SIZE = 10, BEST_CANDIDATES = 20;
+    private static final Duration BEST_CACHE_TTL = Duration.ofSeconds(10);
+    private record Ranked(String letterId, int reactionCount) {}
+    private record CachedRanking(Instant expiresAt, List<Ranked> rows) {}
     private final JdbcTemplate jdbc;
+    private final ConcurrentHashMap<String, CachedRanking> bestCache = new ConcurrentHashMap<>();
 
     public JdbcEngagementService(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
@@ -103,26 +111,52 @@ public class JdbcEngagementService implements EngagementService {
         if (!"all".equals(scope) && !"bridge".equals(scope)) throw invalid("INVALID_SCOPE", "범위를 다시 선택해 주세요.");
         if ("bridge".equals(scope) && (bridgeId == null || bridgeId.isBlank())) throw invalid("BRIDGE_REQUIRED", "다리를 선택해 주세요.");
         Instant now = Instant.now(); Instant start = periodStart(period, now);
-        return jdbc.query("""
-            SELECT l.id::text, l.bridge_id, l.body, l.display_nickname, l.theme, q.body AS question_body,
-                   count(r.id)::int AS reaction_count
-            FROM reactions r JOIN letters l ON l.id = r.letter_id
-            LEFT JOIN questions q ON l.question_id = q.id
-            WHERE r.active = true AND r.activated_at >= ? AND r.activated_at <= ?
-              AND l.status = 'published' AND (?::text IS NULL OR l.bridge_id = ?)
-            GROUP BY l.id, q.body
-            ORDER BY reaction_count DESC, max(r.activated_at) DESC, l.id ASC
-            LIMIT 10
-            """, (rs, index) -> {
+        String bridge = "bridge".equals(scope) ? bridgeId : null;
+        List<Ranked> ranking = ranking(bridge, period, start, now);
+        if (ranking.isEmpty()) return List.of();
+        // 순위(편지 id·반응 수)는 캐시에서 가져오더라도, 본문과 공개 상태는 매번 지금 값으로 읽는다.
+        // 그래서 임시 숨김·삭제된 편지는 캐시와 상관없이 바로 서랍장에서 빠진다.
+        Map<String, Map<String, Object>> letters = new LinkedHashMap<>();
+        jdbc.query("""
+            SELECT l.id::text, l.bridge_id, l.body, l.display_nickname, l.theme, q.body AS question_body
+            FROM letters l LEFT JOIN questions q ON l.question_id = q.id
+            WHERE l.id = ANY(string_to_array(?, ',')::uuid[]) AND l.status = 'published'
+            """, rs -> {
                 // 시작 편지는 질문이 없어 questionBody가 null이므로 null을 허용하는 맵을 쓴다.
                 Map<String, Object> item = new LinkedHashMap<>();
-                item.put("rank", index + 1); item.put("id", rs.getString("id")); item.put("bridgeId", rs.getString("bridge_id"));
+                item.put("id", rs.getString("id")); item.put("bridgeId", rs.getString("bridge_id"));
                 item.put("preview", preview(rs.getString("body"))); item.put("displayNickname", rs.getString("display_nickname"));
-                item.put("theme", rs.getInt("theme")); item.put("reactionCount", rs.getInt("reaction_count"));
-                item.put("questionBody", rs.getString("question_body"));
-                return item;
-            },
-            java.sql.Timestamp.from(start), java.sql.Timestamp.from(now), "bridge".equals(scope) ? bridgeId : null, "bridge".equals(scope) ? bridgeId : null);
+                item.put("theme", rs.getInt("theme")); item.put("questionBody", rs.getString("question_body"));
+                letters.put(rs.getString("id"), item);
+            }, String.join(",", ranking.stream().map(Ranked::letterId).toList()));
+        List<Map<String, Object>> best = new ArrayList<>();
+        for (Ranked ranked : ranking) {
+            Map<String, Object> letter = letters.get(ranked.letterId());
+            if (letter == null) continue;
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("rank", best.size() + 1); item.putAll(letter); item.put("reactionCount", ranked.reactionCount());
+            best.add(item);
+            if (best.size() == BEST_SIZE) break;
+        }
+        return best;
+    }
+
+    // 서랍장은 손님이 한 바퀴 돌 때마다 부르는데, 순위 집계는 기간 안의 반응을 모두 읽는다(한 달 x3 데이터에서 커넥션 풀을 막아 사이트가 멈췄다).
+    // 그래서 집계 결과만 짧게 캐시한다. 같은 조합의 요청이 동시에 와도 compute가 한 번만 집계한다.
+    // 숨김 편지가 빠져도 10통을 채울 수 있게 후보를 넉넉히 뽑아 둔다.
+    private List<Ranked> ranking(String bridgeId, String period, Instant start, Instant now) {
+        if (bestCache.size() > 64) bestCache.clear(); // 없는 다리 id를 계속 바꿔 보내도 캐시가 끝없이 커지지 않게 한다
+        String key = bridgeId + "|" + period + "|" + start;
+        return bestCache.compute(key, (k, cached) -> cached != null && cached.expiresAt().isAfter(now) ? cached : new CachedRanking(now.plus(BEST_CACHE_TTL), jdbc.query("""
+            SELECT r.letter_id::text, count(*)::int AS reaction_count
+            FROM reactions r JOIN letters l ON l.id = r.letter_id
+            WHERE r.active = true AND r.activated_at >= ? AND r.activated_at <= ?
+              AND l.status = 'published' AND (?::text IS NULL OR l.bridge_id = ?)
+            GROUP BY r.letter_id
+            ORDER BY reaction_count DESC, max(r.activated_at) DESC, r.letter_id ASC
+            LIMIT ?
+            """, (rs, index) -> new Ranked(rs.getString(1), rs.getInt(2)),
+            java.sql.Timestamp.from(start), java.sql.Timestamp.from(now), bridgeId, bridgeId, BEST_CANDIDATES))).rows();
     }
 
     private void published(String letterId) {
