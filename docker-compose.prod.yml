@@ -9,8 +9,10 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # 서버 안(127.0.0.1)에서만 연다. 백엔드는 Docker 내부 네트워크(db:5432)로 붙으니 외부 공개가 필요 없고,
+    # DB 툴은 SSH 터널로 접속한다. 보안 그룹 설정 실수 하나로 DB가 인터넷에 노출되지 않게 한다.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
 
   backend:
     build: .

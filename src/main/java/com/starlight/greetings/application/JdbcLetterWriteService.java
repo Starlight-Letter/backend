@@ -13,6 +13,11 @@ import com.starlight.greetings.web.ApiException; import com.starlight.greetings.
     var questions=jdbc.query("select id::text from questions where bridge_id=? and status='published' and effective_at<=now() order by effective_at desc,id desc limit 1",(r,i)->r.getString(1),bridge);
     if(questions.isEmpty()||!questions.get(0).equals(question))throw new ApiException(HttpStatus.CONFLICT,"QUESTION_CHANGED","질문이 바뀌었어요. 새 질문을 확인해 주세요.");
     // 강물 도배 방지: 한 계정이 24시간 동안 한 다리에 3통, 전체 10통까지 (같은 요청 키 재전송은 위에서 이미 돌려보냄)
+    // 세기 전에 이 회원 행을 잠가 같은 회원의 작성을 한 줄로 세운다. 안 그러면 동시에 보낸 요청들이 서로의 저장을 못 본 채
+    // 모두 "아직 여유 있음"으로 세어 제한을 넘긴다. 다른 회원끼리는 서로 막지 않는다.
+    // FOR UPDATE가 아니라 NO KEY UPDATE인 이유: 위 request_keys 삽입이 외래 키 때문에 이 행에 KEY SHARE 잠금을 이미 걸어 두는데,
+    // FOR UPDATE는 그것과 충돌해 동시 요청끼리 교착된다. NO KEY UPDATE는 KEY SHARE와 충돌하지 않고 서로끼리만 막는다.
+    jdbc.query("select 1 from users where id=?::uuid for no key update",(r,i)->1,user);
     var recent=jdbc.queryForObject("select count(*) filter (where bridge_id=?)::int, count(*)::int from letters where author_user_id=?::uuid and created_at>now()-interval '24 hours'",(r,i)->new int[]{r.getInt(1),r.getInt(2)},bridge,user);
     if(recent[0]>=BRIDGE_DAILY_LIMIT)throw new ApiException(HttpStatus.TOO_MANY_REQUESTS,"LETTER_LIMIT","오늘은 이 다리에 안부를 충분히 띄웠어요. 내일 다시 띄워 주세요.");
     if(recent[1]>=TOTAL_DAILY_LIMIT)throw new ApiException(HttpStatus.TOO_MANY_REQUESTS,"LETTER_LIMIT","오늘은 안부를 충분히 띄웠어요. 내일 다시 띄워 주세요.");
