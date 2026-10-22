@@ -21,12 +21,23 @@ services:
     depends_on:
       - db
     ports:
-      - "8080:8080"
+      - "3000:3000"
+    # 비밀 값(DB 비밀번호, 운영자 TOTP 키·계정)은 이 파일에 직접 쓰지 않는다. 서버의 같은 폴더에 있는 .env(git 제외)에 두면
+    # docker compose가 ${이름} 자리에 채워 넣는다. 필요한 값: DB_PASSWORD, ADMIN_TOTP_KEY, ADMIN_NICKNAME, ADMIN_PASSWORD
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/starlight
       SPRING_DATASOURCE_USERNAME: postgres
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
-      # application.yml에서 사용하는 TOTP 키나 암호화 환경변수가 있다면 여기에 추가
+      APP_ALLOWED_ORIGINS: "https://www.starletter.co.kr,https://starletter.co.kr,http://localhost:5173"
+      # CloudFront 한 단을 거쳐 들어오므로, 가입 IP 제한이 실제 접속자 IP로 동작하도록 X-Forwarded-For를 한 단계 믿는다.
+      APP_TRUSTED_PROXY_HOPS: "1"
+      ADMIN_TOTP_KEY: ${ADMIN_TOTP_KEY}
+      ADMIN_NICKNAME: ${ADMIN_NICKNAME}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      # 비밀번호 해시(Argon2)가 해시마다 쓰는 19MB 네이티브 메모리를 쓰자마자 OS에 돌려주게 한다.
+      # 기본 설정이면 glibc가 해제된 큰 블록을 쥐고 있어, 로그인이 몰린 뒤 메모리가 1GB 넘게 남아 스왑에 빠진다(부하 테스트로 확인).
+      MALLOC_ARENA_MAX: "2"
+      MALLOC_MMAP_THRESHOLD_: "131072"
 
 volumes:
   postgres_data:
