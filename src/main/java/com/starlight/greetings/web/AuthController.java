@@ -21,8 +21,7 @@ public class AuthController {
 
     @GetMapping("/check-nickname")
     public ResponseEntity<ApiEnvelope<Map<String, Object>>> checkNickname(@RequestParam("nickname") String nickname) {
-        boolean available = signupService.isNicknameAvailable(nickname);
-        return ResponseEntity.ok(ApiEnvelope.of(Map.of("available", available)));
+        return ResponseEntity.ok(ApiEnvelope.of(signupService.checkNickname(nickname)));
     }
 
     @PostMapping("/signup")

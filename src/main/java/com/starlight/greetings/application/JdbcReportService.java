@@ -12,14 +12,17 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class JdbcReportService implements ReportService {
- private static final Set<String> REASONS = Set.of("inappropriate", "advertising", "personal_info", "other");
+ private static final Set<String> REASONS = Set.of("inappropriate", "advertising", "personal_info", "nickname", "other");
  private final JdbcTemplate jdbc;
  public JdbcReportService(JdbcTemplate jdbc) { this.jdbc = jdbc; }
  @Transactional @Override public Map<String,Object> report(String letterId, String userId, String reasonCode) {
   if (!REASONS.contains(reasonCode)) throw new ApiException(HttpStatus.BAD_REQUEST,"INVALID_REASON","신고 사유를 다시 선택해 주세요.");
   try { UUID.fromString(letterId); } catch (Exception e) { throw missing(); }
-  var letters = jdbc.query("SELECT status, report_round FROM letters WHERE id = ?::uuid FOR UPDATE", (rs, row) -> new Object[] {rs.getString(1), rs.getInt(2)}, letterId);
+  var letters = jdbc.query("SELECT status, report_round, is_seed, display_nickname FROM letters WHERE id = ?::uuid FOR UPDATE", (rs, row) -> new Object[] {rs.getString(1), rs.getInt(2), rs.getBoolean(3), rs.getString(4)}, letterId);
   if (letters.isEmpty() || !"published".equals(letters.get(0)[0])) throw missing();
+  // 닉네임 신고는 회원 닉네임이 서명으로 보이는 편지에만: 시작 편지와 익명 편지에는 신고할 닉네임이 없다
+  if ("nickname".equals(reasonCode) && ((Boolean) letters.get(0)[2] || "익명의 별빛".equals(letters.get(0)[3])))
+   throw new ApiException(HttpStatus.BAD_REQUEST,"INVALID_REASON","이 편지에는 신고할 닉네임이 없어요.");
   int round = (Integer) letters.get(0)[1];
   try {
    jdbc.update("INSERT INTO reports (id, letter_id, reporter_user_id, round, reason_code, status) VALUES (?::uuid, ?::uuid, ?::uuid, ?, ?, 'pending')", UUID.randomUUID().toString(), letterId, userId, round, reasonCode);
