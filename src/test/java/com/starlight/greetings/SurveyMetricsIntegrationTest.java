@@ -52,6 +52,16 @@ class SurveyMetricsIntegrationTest {
    Map<String, Object> october = service.summary("2026-10-01T00:00:00Z", "2026-11-01T00:00:00Z");
    assertEquals(List.of(Map.of("bridgeId", "bongnim", "total", 1, "guest", 1, "member", 0), Map.of("bridgeId", "sillim", "total", 1, "guest", 0, "member", 1)), october.get("bridgeVisits"));
    assertEquals(Map.of("total", 0, "guest", 0, "member", 0), service.summary("2026-10-11T00:00:00Z", null).get("homeVisits"));
+
+   // 별자리: 업적별 인원, 별 개수 분포(별 0개 회원 포함, 완성 표시는 별 개수에서 뺀다), 특별한 병 편지 수
+   String lit = UUID.randomUUID().toString(), dark = UUID.randomUUID().toString();
+   jdbc.update("insert into users (id,nickname,nickname_key,password_hash,recovery_code_hash,role,status) values (?::uuid,'별','별','h','r','member','active'),(?::uuid,'밤','밤','h','r','member','active')", lit, dark);
+   jdbc.update("insert into user_achievements (user_id,code) values (?::uuid,'first_letter'),(?::uuid,'two_nights'),(?::uuid,'constellation')", lit, lit, lit);
+   jdbc.update("insert into letters (id,bridge_id,display_nickname,body,theme,is_seed,status) values (gen_random_uuid(),'sillim','별빛안부','반짝',5,true,'published'),(gen_random_uuid(),'sillim','별빛안부','반짝',1,true,'published')");
+   @SuppressWarnings("unchecked") Map<String, Object> stars = (Map<String, Object>) service.summary(null, null).get("achievements");
+   assertEquals(List.of(Map.of("code", "constellation", "count", 1), Map.of("code", "first_letter", "count", 1), Map.of("code", "two_nights", "count", 1)), stars.get("byCode"));
+   assertEquals(List.of(Map.of("stars", 0, "members", 1), Map.of("stars", 2, "members", 1)), stars.get("starDistribution"));
+   assertEquals(List.of(Map.of("theme", 5, "count", 1)), stars.get("specialBottles"));
   } finally {
    try (Connection connection = DriverManager.getConnection(base, auth[0], auth[1]); Statement statement = connection.createStatement()) { statement.execute("drop schema if exists " + schema + " cascade"); }
   }

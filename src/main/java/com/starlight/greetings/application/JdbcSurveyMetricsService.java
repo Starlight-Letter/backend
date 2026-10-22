@@ -19,6 +19,14 @@ import com.starlight.greetings.web.ApiException; import java.sql.Timestamp; impo
  out.put("signupCompleted",jdbc.queryForObject("select count(*)::int from users where role='member'"+range,Integer.class,args));
  out.put("memberLettersByBridge",jdbc.query("select bridge_id,count(*)::int count from letters where is_seed=false and status<>'deleted' group by bridge_id order by bridge_id",(r,i)->bridgeCount(r.getString(1),r.getInt(2))));
  out.put("surveyOpens",byBridge(events,"survey_open"));
+ out.put("achievements",achievements());
+ return out;}
+ // 별자리 업적(누적, 조회 기간과 무관): 업적별 달성 인원, 활동 중인 회원의 별 개수 분포, 특별한 병(5 별무리, 6 은하수)으로 띄운 편지 수.
+ // 별은 회원이 계정·쓰기 화면을 열거나 편지를 보낼 때 기록되므로 '별을 확인한 사람' 기준이다.
+ private Map<String,Object> achievements(){Map<String,Object> out=new LinkedHashMap<>();
+ out.put("byCode",jdbc.query("select a.code,count(*)::int from user_achievements a join users u on u.id=a.user_id where u.role='member' group by a.code order by a.code",(r,i)->Map.<String,Object>of("code",r.getString(1),"count",r.getInt(2))));
+ out.put("starDistribution",jdbc.query("select stars,count(*)::int from (select u.id,count(a.code) filter (where a.code<>'constellation')::int stars from users u left join user_achievements a on a.user_id=u.id where u.role='member' and u.status='active' group by u.id) t group by stars order by stars",(r,i)->Map.<String,Object>of("stars",r.getInt(1),"members",r.getInt(2))));
+ out.put("specialBottles",jdbc.query("select theme,count(*)::int from letters where theme in (5,6) and status<>'deleted' group by theme order by theme",(r,i)->Map.<String,Object>of("theme",r.getInt(1),"count",r.getInt(2))));
  return out;}
  private record EventCount(String type,String bridgeId,int total,int guest,int member){}
  // DB의 order by bridge_id와 같은 순서(다리 없는 기록은 마지막)
