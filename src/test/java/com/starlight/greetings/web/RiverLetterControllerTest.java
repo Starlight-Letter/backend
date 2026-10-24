@@ -20,9 +20,16 @@ class RiverLetterControllerTest {
     @MockBean private LetterQueryService letterQueryService;
 
     @Test void returnsBridgeRiverLetters() throws Exception {
-        given(letterQueryService.river("bongnim")).willReturn(List.of(new LetterPreview("letter-1", "bongnim", 2, true, "작은 안부", Instant.parse("2026-10-01T00:00:00Z"))));
+        given(letterQueryService.river("bongnim", List.of())).willReturn(List.of(new LetterPreview("letter-1", "bongnim", 2, true, "작은 안부", Instant.parse("2026-10-01T00:00:00Z"))));
         mvc.perform(get("/api/v1/bridges/bongnim/river"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data[0].preview").value("작은 안부"));
+    }
+
+    @Test void passesSeenLetterIdsToTheQuery() throws Exception {
+        given(letterQueryService.river("sillim", List.of("a", "b"))).willReturn(List.of(new LetterPreview("letter-2", "sillim", 1, false, "다시 온 안부", Instant.parse("2026-10-01T00:00:00Z"))));
+        mvc.perform(get("/api/v1/bridges/sillim/river").param("seen", "a,b"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data[0].id").value("letter-2"));
     }
 }
