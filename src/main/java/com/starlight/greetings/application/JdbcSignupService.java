@@ -48,8 +48,8 @@ public class JdbcSignupService implements SignupService {
         SignupValidator.Nickname nickname;
         try { nickname = validator.nickname(nicknameInput); }
         catch (IllegalArgumentException e) { return Map.of("available", false, "reason", "invalid", "message", e.getMessage()); }
-        String problem = policy.problem(nickname.display());
-        if (problem != null) return Map.of("available", false, "reason", "not_allowed", "message", policy.message(problem));
+        String problem = policy.explain(nickname.display());
+        if (problem != null) return Map.of("available", false, "reason", "not_allowed", "message", problem);
         Integer count = jdbc.queryForObject("select count(*) from users where nickname_key = ? and status in ('active', 'suspended')", Integer.class, nickname.key());
         if (count != null && count > 0) return Map.of("available", false, "reason", "taken", "message", "이미 다른 회원이 사용 중인 닉네임입니다.");
         return Map.of("available", true);
