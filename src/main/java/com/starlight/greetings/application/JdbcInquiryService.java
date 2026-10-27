@@ -14,15 +14,13 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class JdbcInquiryService implements InquiryService {
- private static final Set<String> TYPES = Set.of("privacy", "service", "suggestion", "removal");
+ private static final Set<String> TYPES = Set.of("privacy", "service", "suggestion");
  private static final Pattern EMAIL = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
  private final JdbcTemplate jdbc;
  public JdbcInquiryService(JdbcTemplate jdbc) { this.jdbc = jdbc; }
  @Override public Map<String,Object> submit(Map<String,Object> input, String source) {
   String type = asString(input.get("type")); String body = asString(input.get("body"));
   if (!TYPES.contains(type)) throw invalid("INVALID_INQUIRY_TYPE", "문의 종류를 다시 선택해 주세요.");
-  String requesterId = asString(input.get("requesterUserId"));
-  if ("removal".equals(type) && requesterId == null) throw new ApiException(HttpStatus.UNAUTHORIZED,"LOGIN_REQUIRED","로그인이 필요합니다.");
   if (body == null || body.trim().isEmpty() || body.length() > 2000) throw invalid("INVALID_INQUIRY_BODY", "문의 내용을 1~2000자로 입력해 주세요.");
   String email = asString(input.get("replyEmail")); if (email != null && (email.length() > 254 || !EMAIL.matcher(email).matches())) throw invalid("INVALID_EMAIL", "답변받을 이메일을 확인해 주세요.");
   String letterId = asString(input.get("relatedLetterId")); if (letterId != null) try { UUID.fromString(letterId); } catch (Exception e) { throw invalid("INVALID_LETTER", "관련 편지 정보를 확인해 주세요."); }
@@ -33,7 +31,8 @@ public class JdbcInquiryService implements InquiryService {
    """, Integer.class, digest("inquiry-source:" + source));
   if (attempts != null && attempts > 5) throw new ApiException(HttpStatus.TOO_MANY_REQUESTS,"RATE_LIMITED","잠시 후 다시 시도해 주세요.");
   String id = UUID.randomUUID().toString();
-  try { jdbc.update("INSERT INTO inquiries (id,type,body,related_letter_id,requester_user_id,reply_email,status) VALUES (?::uuid,?, ?, ?::uuid, ?::uuid, ?, 'open')", id, type, body.trim(), letterId, requesterId, email); }
+  // 문의는 비공개 접수만 하고 요청자 계정은 남기지 않는다(클라이언트가 보낸 계정 값은 믿을 수 없다)
+  try { jdbc.update("INSERT INTO inquiries (id,type,body,related_letter_id,reply_email,status) VALUES (?::uuid,?, ?, ?::uuid, ?, 'open')", id, type, body.trim(), letterId, email); }
   catch (DataIntegrityViolationException e) { throw invalid("INVALID_LETTER", "관련 편지를 찾을 수 없습니다."); }
   return Map.of("id", id, "status", "open");
  }
