@@ -22,6 +22,8 @@ services:
       - db
     ports:
       - "3000:3000"
+      # 모니터링 지표(/actuator/prometheus). 서버 안에서만 열어 수집기(Alloy)만 읽게 한다.
+      - "127.0.0.1:9091:9091"
     # 비밀 값(DB 비밀번호, 운영자 TOTP 키·계정)은 이 파일에 직접 쓰지 않는다. 서버의 같은 폴더에 있는 .env(git 제외)에 두면
     # docker compose가 ${이름} 자리에 채워 넣는다. 필요한 값: DB_PASSWORD, ADMIN_TOTP_KEY, ADMIN_NICKNAME, ADMIN_PASSWORD
     environment:
@@ -39,5 +41,38 @@ services:
       MALLOC_ARENA_MAX: "2"
       MALLOC_MMAP_THRESHOLD_: "131072"
 
+  # 지표 수집기. 서버·백엔드·DB 지표를 모아 Grafana Cloud로 보낸다(설정: monitoring/config.alloy).
+  # 호스트 네트워크를 써서 127.0.0.1에만 열린 백엔드 관리 포트와 DB에 붙고, 네트워크 지표도 컨테이너가 아닌 서버 기준으로 잰다.
+  # 필요한 .env 값: GRAFANA_CLOUD_PROM_URL, GRAFANA_CLOUD_PROM_USER, GRAFANA_CLOUD_PROM_TOKEN, POSTGRES_MONITOR_PASSWORD
+  alloy:
+    image: grafana/alloy:v1.10.0
+    container_name: starlight-alloy
+    restart: always
+    network_mode: host
+    pid: host
+    depends_on:
+      - backend
+    command:
+      - run
+      # 수집기 상태 화면은 서버 안에서만(SSH 터널로 확인).
+      - --server.http.listen-addr=127.0.0.1:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    environment:
+      GRAFANA_CLOUD_PROM_URL: ${GRAFANA_CLOUD_PROM_URL}
+      GRAFANA_CLOUD_PROM_USER: ${GRAFANA_CLOUD_PROM_USER}
+      GRAFANA_CLOUD_PROM_TOKEN: ${GRAFANA_CLOUD_PROM_TOKEN}
+      POSTGRES_MONITOR_DSN: postgresql://alloy_monitor:${POSTGRES_MONITOR_PASSWORD}@127.0.0.1:5432/starlight?sslmode=disable
+      # 2GB 서버에서 앱 메모리를 뺏지 않도록 상한을 둔다. GOMEMLIMIT으로 상한 전에 GC가 먼저 돌게 한다.
+      GOMEMLIMIT: 160MiB
+    mem_limit: 200m
+    volumes:
+      - ./monitoring/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy_data:/var/lib/alloy/data
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro
+
 volumes:
   postgres_data:
+  alloy_data:

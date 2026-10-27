@@ -13,6 +13,23 @@ spring:
     baseline-description: Node.js schema migrations
     locations: classpath:db/migration
 
+# 모니터링 지표(Prometheus 형식). 서비스 포트(3000)와 다른 포트로 열어, CloudFront로 들어오는 외부 요청은 닿지 않게 한다.
+# 운영 compose에서는 이 포트를 호스트로 내보내지 않고, 같은 Docker 네트워크의 수집기(Alloy)만 읽는다.
+management:
+  server:
+    port: ${MANAGEMENT_PORT:9091}
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  metrics:
+    tags:
+      application: starlight-backend
+    distribution:
+      # 응답시간 백분위(p95 등)를 계산하기 위한 구간. 전체 히스토그램을 켜면 시계열이 수십 배로 늘어나 무료 한도를 넘기 쉽다.
+      slo:
+        http.server.requests: 50ms,100ms,200ms,500ms,1s,2s
+
 app:
   # 앞단 프록시(로드밸런서·CDN) 수. 운영에서 프록시 뒤라면 1 이상으로 설정해야 가입 IP 제한이 실제 접속자 IP로 동작한다.
   # 0이면 X-Forwarded-For를 믿지 않고 직접 연결 주소를 쓴다(로컬 개발 기본값).

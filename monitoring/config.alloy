@@ -1,0 +1,85 @@
+// 운영 지표 수집기(Grafana Alloy) 설정.
+// 서버(EC2)에서 지표를 모아 Grafana Cloud Prometheus로 보내기만 한다. 저장·대시보드는 클라우드가 맡아 t3.small 자원을 아낀다.
+// 접속 정보는 이 파일에 쓰지 않고, 서버 .env의 값을 docker compose가 환경 변수로 넣어 준다.
+//
+// 수집 간격은 60초. Grafana Cloud 무료 플랜은 "시계열 수 x 분당 수집 횟수"로 한도를 세기 때문에,
+// 15초로 줄이면 같은 지표가 4배로 계산된다.
+
+prometheus.remote_write "grafana_cloud" {
+	endpoint {
+		url = sys.env("GRAFANA_CLOUD_PROM_URL")
+
+		basic_auth {
+			username = sys.env("GRAFANA_CLOUD_PROM_USER")
+			password = sys.env("GRAFANA_CLOUD_PROM_TOKEN")
+		}
+	}
+
+	// 모든 지표에 붙는 서버 이름. 나중에 서버가 늘어나도 구분할 수 있게 한다.
+	external_labels = {
+		host = "starlight-ec2",
+	}
+}
+
+// 1) 백엔드(Spring Actuator): JVM 힙·GC, HTTP 요청 수·응답시간, DB 커넥션 풀(Hikari).
+//    관리 포트 9091은 서버 안(127.0.0.1)에만 열려 있다.
+prometheus.scrape "backend" {
+	targets = [{
+		__address__ = "127.0.0.1:9091",
+		job         = "starlight-backend",
+	}]
+	metrics_path    = "/actuator/prometheus"
+	scrape_interval = "60s"
+	forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+}
+
+// 2) 서버(호스트): CPU, 메모리, 스왑, 디스크, 네트워크.
+//    컨테이너 안에서 호스트 값을 읽도록 /proc·/sys·/ 를 /host 아래로 마운트해 둔다(compose 참고).
+//    수집기는 필요한 것만 켜서 시계열 수를 줄인다.
+prometheus.exporter.unix "host" {
+	procfs_path = "/host/proc"
+	sysfs_path  = "/host/sys"
+	rootfs_path = "/host/root"
+
+	set_collectors = [
+		"cpu",
+		"diskstats",
+		"filesystem",
+		"loadavg",
+		"meminfo",
+		"netdev",
+		"pressure",
+		"stat",
+		"time",
+		"uname",
+		"vmstat",
+	]
+
+	filesystem {
+		fs_types_exclude     = "^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tmpfs|tracefs)$"
+		mount_points_exclude = "^/(dev|proc|run|sys|var/lib/docker/.+)($|/)"
+	}
+
+	netdev {
+		// 도커가 만드는 가상 인터페이스(veth, br-)는 빼고 실제 네트워크 카드만 본다.
+		device_exclude = "^(veth.*|br-.*|docker.*|lo)$"
+	}
+}
+
+prometheus.scrape "host" {
+	targets         = prometheus.exporter.unix.host.targets
+	scrape_interval = "60s"
+	forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+}
+
+// 3) PostgreSQL: 연결 수, 트랜잭션, 캐시 적중률, 잠금.
+//    읽기 전용 모니터링 계정(pg_monitor 역할)으로 접속한다. 계정이 없으면 pg_up=0만 보내고 서비스에는 영향이 없다.
+prometheus.exporter.postgres "db" {
+	data_source_names = [sys.env("POSTGRES_MONITOR_DSN")]
+}
+
+prometheus.scrape "db" {
+	targets         = prometheus.exporter.postgres.db.targets
+	scrape_interval = "60s"
+	forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+}

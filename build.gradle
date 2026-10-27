@@ -23,7 +23,9 @@ dependencies {
     implementation 'org.springframework.security:spring-security-crypto'
     implementation 'de.mkammerer:argon2-jvm:2.11'
     implementation 'org.flywaydb:flyway-database-postgresql'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
     runtimeOnly 'org.postgresql:postgresql'
+    runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
 }
