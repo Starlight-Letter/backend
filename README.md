@@ -55,6 +55,13 @@
 
 ## 시스템 아키텍처
 
+![별빛안부 시스템 아키텍처](docs/architecture.png)
+
+<details>
+<summary>텍스트로 보기 (Mermaid)</summary>
+
+그림 원본은 [`docs/architecture.svg`](docs/architecture.svg)입니다.
+
 ```mermaid
 flowchart TB
     subgraph Client["📱 이용자"]
@@ -96,6 +103,8 @@ flowchart TB
     ALERT --> DISCORD
     Browser -.->|"GTM 맞춤 이벤트"| GA
 ```
+
+</details>
 
 | 구성 요소 | 역할과 설계 이유 |
 |---|---|
