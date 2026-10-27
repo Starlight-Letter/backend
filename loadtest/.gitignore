@@ -1,0 +1,3 @@
+# k6가 남기는 측정 결과
+*.json
+write-result.txt
